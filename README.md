@@ -1,0 +1,65 @@
+# Education Center
+
+Tədris mərkəzləri üçün idarəetmə sistemi: filiallar, qruplar, cədvəl, dərslər, davamiyyət, imtahanlar, ödənişlər, hesabatlar. Rollar: admin, müəllim, şagird, valideyn.
+
+Bir quraşdırma çox mərkəzə xidmət edir:
+- **Mərkəz** öz domenində açılır.
+- **Məlumat:** hər mərkəzin öz bazası var (`<DB_NAME>_t<id>`).
+- **Giriş token-i** yalnız verildiyi mərkəzdə keçərlidir.
+
+| Hissə | Texnologiya |
+|---|---|
+| `backend/` | Go (gin, gorm), PostgreSQL |
+| `frontend/` | Next.js 14, Tailwind |
+
+## İşə salmaq
+
+```bash
+cp .env.example .env      # parolları və JWT_SECRET-i doldurun
+docker compose up -d --build
+```
+
+Veb tətbiq `127.0.0.1:3000`-də açılır. Qarşısına HTTPS ilə nginx qoyun. Bütün domenlər (mərkəzlərin domenləri və super admin ünvanı) eyni yerə yönəlir:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    client_max_body_size 32m;
+}
+```
+
+## Mərkəz yaratmaq
+
+1. `https://<SUPER_HOST>/super` ünvanını açın. İlk super admin `.env`-dəki `SUPERADMIN_EMAIL` və `SUPERADMIN_PASSWORD`-dan yaranır.
+2. "Yeni mərkəz" düyməsini basın və bunları yazın:
+   - mərkəzin adı;
+   - domenləri;
+   - ilk adminin adı, e-poçtu və parolu.
+
+   Mərkəzin bazası, cədvəlləri və ilkin sorğu kitabçaları avtomatik yaranır.
+3. Domenin DNS-ini serverə yönəldin. Mərkəzin admini `https://<domen>/login` ünvanında daxil olur.
+
+Super admin paneldən mərkəzi dayandırmaq, domenlərini dəyişmək və istifadəçiyə yeni parol vermək olar.
+
+## Köhnə quraşdırmadan məlumat köçürmək
+
+1. Paneldə mərkəzi yaradın. Bazanın adı paneldə görünür, məsələn `educenter_t1`.
+2. Yeni bazanı boşaldın və köhnə bazanın `edu_*` cədvəllərini köçürün:
+
+   ```bash
+   psql -d educenter_t1 -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+   pg_dump --no-owner --no-privileges -t 'edu_*' <köhnə baza> | psql -d educenter_t1
+   ```
+
+3. Backend-i yenidən başladın (`docker compose restart backend`).
+
+İlk sorğuda server cədvəlləri yeniləyir və istifadəçiləri bu mərkəzə bağlayır: köhnə `project_id` sütunu `tenant_id` olur. İstifadəçilərin köhnə parolları işləməyə davam edir.
+
+## Testlər
+
+```bash
+cd backend && go test ./...    # PostgreSQL lazımdır: TEST_DATABASE_URL
+```
