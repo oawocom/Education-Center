@@ -1,7 +1,8 @@
 #!/bin/bash
 # Brings the server up to date with GitHub's main: when main has a commit the server
 # has not deployed yet, it is checked out and the stack is rebuilt. The timer runs this
-# every minute, so a push to main reaches the server within a few minutes.
+# every minute, so a push to main reaches the server within a few minutes. Each run also
+# gives new domains from the super admin panel their nginx site and certificate (domains.sh).
 #   deploy/update.sh            deploy if main changed
 #   deploy/update.sh --force    rebuild now
 # Logs: journalctl -u <name>-update
@@ -9,6 +10,8 @@
 main() {
   set -euo pipefail
   cd "$(dirname "$0")/.."
+  # new domains from the super admin panel: nginx site + certificate (never stops a deploy)
+  deploy/domains.sh || true
   git fetch -q origin main
   local want deployed failed
   want=$(git rev-parse origin/main)

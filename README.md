@@ -28,6 +28,8 @@ Skript bunları edir:
 
 `main` budağına edilən hər push bir neçə dəqiqəyə serverə özü gəlir (`deploy/update.sh`, hər dəqiqə). Gedişatı `journalctl -u education-center-update` göstərir.
 
+Super admin panelində əlavə edilən hər domen üçün nginx saytı və HTTPS sertifikatı da avtomatik qurulur (`deploy/domains.sh`). Bunun üçün domenin DNS-i (A qeydi) bu serverə yönəlməlidir. Sertifikat alınmasa, bir saatdan sonra yenidən cəhd edilir.
+
 ## İşə salmaq
 
 ```bash
