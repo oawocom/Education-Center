@@ -64,17 +64,23 @@ Super admin paneldən mərkəzi dayandırmaq, domenlərini dəyişmək və istif
 
 ## Köhnə quraşdırmadan məlumat köçürmək
 
-1. Paneldə mərkəzi yaradın. Bazanın adı paneldə görünür, məsələn `educenter_t1`.
-2. Yeni bazanı boşaldın və köhnə bazanın `edu_*` cədvəllərini köçürün:
+1. Paneldə tenant yaradın. Bazanın adı kartda görünür, məsələn `educenter_t1`.
+2. Köhnə serverdə dump çıxarın:
 
    ```bash
-   psql -d educenter_t1 -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
-   pg_dump --no-owner --no-privileges -t 'edu_*' <köhnə baza> | psql -d educenter_t1
+   pg_dump --no-owner --no-privileges -t 'edu_*' <köhnə baza> | gzip > edu.sql.gz
    ```
 
-3. Backend-i yenidən başladın (`docker compose restart backend`).
+3. Dump-ı bu serverə köçürün, məsələn `scp` ilə `/root/migrate/`-ə.
+4. Bu serverdə işə salın:
 
-İlk sorğuda server cədvəlləri yeniləyir və istifadəçiləri bu mərkəzə bağlayır: köhnə `project_id` sütunu `tenant_id` olur. İstifadəçilərin köhnə parolları işləməyə davam edir.
+   ```bash
+   deploy/import.sh educenter_t1 /root/migrate/edu.sql.gz
+   ```
+
+Skript tenantın indiki bazasını əvvəlcə `/root/migrate/` qovluğunda saxlayır, sonra köhnə məlumatla əvəz edir və backend-i yenidən başladır.
+
+İlk sorğuda server cədvəlləri yeniləyir və istifadəçiləri bu tenanta bağlayır: köhnə `project_id` sütunu `tenant_id` olur. İstifadəçilərin köhnə parolları işləməyə davam edir.
 
 ## Testlər
 
