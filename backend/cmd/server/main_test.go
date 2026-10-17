@@ -169,7 +169,9 @@ func TestCentres(t *testing.T) {
 	// a forgotten password, then a paused centre
 	c.must(200, "POST", panel, fmt.Sprintf("/api/super/tenants/%d/password", a), st, map[string]string{"email": "admin@a.test", "password": "newsecret1"})
 	login("a.test", "admin@a.test", "newsecret1")
-	c.must(400, "POST", panel, fmt.Sprintf("/api/super/tenants/%d/admin", a), st, map[string]string{"name": "Second", "email": "two@a.test", "password": "secret123"})
+	c.must(201, "POST", panel, fmt.Sprintf("/api/super/tenants/%d/admin", a), st, map[string]string{"name": "Second", "email": "two@a.test", "password": "secret123"})
+	c.must(400, "POST", panel, fmt.Sprintf("/api/super/tenants/%d/admin", a), st, map[string]string{"name": "Again", "email": "TWO@a.test", "password": "secret123"})
+	login("a.test", "two@a.test", "secret123")
 	c.must(200, "PUT", panel, fmt.Sprintf("/api/super/tenants/%d", b), st, map[string]interface{}{"name": "Centre B", "is_active": false, "domains": []string{"b.test"}})
 	c.must(403, "POST", "b.test", "/api/auth/login", "", map[string]string{"email": "admin@b.test", "password": "secret123"})
 	c.must(403, "GET", "www.b.test", "/api/tenant", "", nil) // www. falls back to b.test, which is paused

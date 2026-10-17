@@ -11,7 +11,7 @@ import (
 // ============================================================
 // A CENTRE'S DATABASE
 // Prepare brings it up to date, Seed (handlers.go) fills the default
-// lookups, CreateFirstAdmin opens the centre's first account.
+// lookups, CreateAdmin opens admin accounts.
 // The super admin panel uses these when it creates a centre.
 // ============================================================
 
@@ -31,16 +31,16 @@ func Prepare(db *gorm.DB, tenantID uint) error {
 	return db.Unscoped().Model(&EduUser{}).Where("tenant_id <> ?", tenantID).UpdateColumn("tenant_id", tenantID).Error
 }
 
-// CreateFirstAdmin opens the centre's first admin account; it is refused once the centre has an admin.
-func CreateFirstAdmin(db *gorm.DB, tenantID uint, name, email, password string) (*EduUser, error) {
+// CreateAdmin opens an admin account in the centre (the super admin panel's "Admin əlavə et").
+func CreateAdmin(db *gorm.DB, tenantID uint, name, email, password string) (*EduUser, error) {
 	name, email = strings.TrimSpace(name), strings.ToLower(strings.TrimSpace(email))
 	if name == "" || email == "" || len(password) < 6 {
 		return nil, errors.New("ad, e-poçt və ən azı 6 simvolluq parol lazımdır")
 	}
 	var n int64
-	db.Model(&EduUser{}).Where("role = ?", RoleAdmin).Count(&n)
+	db.Model(&EduUser{}).Where("LOWER(email) = ?", email).Count(&n)
 	if n > 0 {
-		return nil, errors.New("bu mərkəzin artıq admini var")
+		return nil, errors.New("bu e-poçtla istifadəçi artıq var — parolunu \"Parol\" düyməsi ilə dəyişin")
 	}
 	hash, err := security.HashPassword(password)
 	if err != nil {

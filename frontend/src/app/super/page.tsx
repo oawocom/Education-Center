@@ -265,7 +265,7 @@ function Panel({ onOut }: { onOut: () => void }) {
                   <button className={ghost} onClick={() => open({ kind: 'password', t })}>
                     <KeyRound className="w-3.5 h-3.5" /> Parol
                   </button>
-                  {t.counts && !t.counts.admins && (
+                  {t.counts && (
                     <button className={ghost} onClick={() => open({ kind: 'admin', t })}>
                       <UserPlus className="w-3.5 h-3.5" /> Admin əlavə et
                     </button>
