@@ -35,13 +35,18 @@ func (h *Handler) tenantDB(c *gin.Context) (*gorm.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	Ensure(db, tenantID)
+	return withTenant(db, tenantID), nil
+}
+
+// Ensure - mərkəzin bazası bu prosesdə hələ yenilənməyibsə, Prepare edir (bir dəfə).
+func Ensure(db *gorm.DB, tenantID uint) {
 	if _, done := migratedTenants.LoadOrStore(tenantID, true); !done {
 		if merr := Prepare(db, tenantID); merr != nil {
 			log.Printf("[education-center] prepare tenant %d: %v", tenantID, merr)
 			migratedTenants.Delete(tenantID)
 		}
 	}
-	return db, nil
 }
 
 // ============================================================
@@ -308,6 +313,7 @@ func crudCreate[T any](c *gin.Context, h *Handler, r Resource[T]) {
 		}
 	}
 
+	auditItem(c, db, "create", r.Name, &item)
 	c.JSON(201, item)
 }
 
@@ -370,6 +376,7 @@ func crudUpdate[T any](c *gin.Context, h *Handler, r Resource[T], allowed map[st
 		}
 	}
 
+	auditItem(c, db, "update", r.Name, &item)
 	c.JSON(200, item)
 }
 
@@ -403,6 +410,7 @@ func crudDelete[T any](c *gin.Context, h *Handler, r Resource[T]) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	auditItem(c, db, "delete", r.Name, &item)
 	c.JSON(200, gin.H{"success": true})
 }
 
@@ -436,6 +444,11 @@ func crudArchive[T any](c *gin.Context, h *Handler, r Resource[T], archive bool)
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	action := "restore"
+	if archive {
+		action = "archive"
+	}
+	auditItem(c, db, action, r.Name, &item)
 	c.JSON(200, gin.H{"success": true, "is_archived": archive})
 }
 
@@ -449,6 +462,7 @@ func writableFields[T any]() map[string]string {
 	protected := map[string]bool{
 		"id": true, "created_at": true, "updated_at": true,
 		"password_hash": true, "tenant_id": true, "-": true, "": true,
+		"notified_at": true,
 	}
 	out := map[string]string{}
 	var m T

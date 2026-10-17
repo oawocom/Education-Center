@@ -26,6 +26,9 @@ func RegisterRoutes(api *gin.RouterGroup, getDB func(uint) (*gorm.DB, error)) {
 		api.POST("/auth/register", h.Register)
 		api.POST("/auth/google", h.GoogleAuth)
 		api.GET("/auth/config", h.AuthConfig)
+		api.POST("/auth/forgot-password", h.ForgotPassword)
+		api.GET("/auth/reset-password", h.VerifyResetToken)
+		api.POST("/auth/reset-password", h.ResetPassword)
 		api.GET("/public/media/:token", h.ServeMedia)
 
 		// --- Panel (token telab edir) ---
@@ -34,6 +37,22 @@ func RegisterRoutes(api *gin.RouterGroup, getDB func(uint) (*gorm.DB, error)) {
 		{
 			sf.GET("/auth/me", h.GetMe)
 			sf.POST("/auth/change-password", h.ChangePassword)
+			sf.PUT("/auth/profile", h.UpdateProfile)
+			sf.POST("/auth/logout-all", h.LogoutAll)
+			sf.GET("/inbox", h.Inbox)
+			sf.POST("/inbox/read", h.InboxRead)
+
+			// E-poçt şablonları, məktub jurnalı, audit — yalnız admin
+			mail := sf.Group("/email")
+			mail.Use(RequireRole(RoleAdmin))
+			{
+				mail.GET("/templates", h.ListEmailTemplates)
+				mail.PUT("/templates/:key", h.SaveEmailTemplate)
+				mail.DELETE("/templates/:key", h.ResetEmailTemplate)
+				mail.POST("/templates/:key/test", h.TestEmailTemplate)
+				mail.GET("/log", h.EmailLogList)
+			}
+			sf.GET("/audit", RequireRole(RoleAdmin), h.AuditList)
 			sf.POST("/auth/choose-role", h.ChooseRole)
 			sf.POST("/auth/add-by-code", RequireRole(RoleAdmin), h.AddByCode)
 			sf.GET("/auth/pending", RequireRole(RoleAdmin), h.ListPending)
@@ -58,6 +77,7 @@ func RegisterRoutes(api *gin.RouterGroup, getDB func(uint) (*gorm.DB, error)) {
 				users.PUT("/:id", h.UpdateUser)
 				users.DELETE("/:id", h.DeleteUser)
 				users.POST("/:id/reset-password", h.ResetUserPassword)
+				users.POST("/:id/send-reset", h.SendUserReset)
 			}
 
 			// Aqreqat hesabatlar (stats.go)

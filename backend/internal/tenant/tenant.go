@@ -21,15 +21,21 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-// Tenant is one centre.
+// Tenant is one centre. The SMTP_* fields are its own mail settings (empty: the server's).
 type Tenant struct {
-	ID        uint      `gorm:"primaryKey" json:"id"`
-	Name      string    `gorm:"size:200;not null" json:"name"`
-	DBName    string    `gorm:"size:63;uniqueIndex;not null" json:"db_name"`
-	IsActive  bool      `gorm:"default:true" json:"is_active"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
-	Domains   []Domain  `gorm:"constraint:OnDelete:CASCADE" json:"domains"`
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Name         string    `gorm:"size:200;not null" json:"name"`
+	DBName       string    `gorm:"size:63;uniqueIndex;not null" json:"db_name"`
+	IsActive     bool      `gorm:"default:true" json:"is_active"`
+	SMTPHost     string    `gorm:"size:255" json:"smtp_host"`
+	SMTPPort     string    `gorm:"size:10" json:"smtp_port"`
+	SMTPUser     string    `gorm:"size:255" json:"smtp_user"`
+	SMTPPassword string    `gorm:"size:255" json:"-"`
+	SMTPFrom     string    `gorm:"size:255" json:"smtp_from"`
+	SMTPFromName string    `gorm:"size:200" json:"smtp_from_name"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	Domains      []Domain  `gorm:"constraint:OnDelete:CASCADE" json:"domains"`
 }
 
 // Domain is an address a centre opens at (no scheme, no port).
@@ -53,6 +59,7 @@ type Store struct {
 	dbs    map[uint]*gorm.DB
 	hosts  map[string]hostInfo
 	names  map[uint]string
+	info   map[uint]Tenant
 	loaded time.Time
 }
 
@@ -169,15 +176,16 @@ func CleanHosts(in []string) ([]string, error) {
 func (s *Store) reload() {
 	var ts []Tenant
 	s.System.Preload("Domains").Find(&ts)
-	hosts, names := map[string]hostInfo{}, map[uint]string{}
+	hosts, names, info := map[string]hostInfo{}, map[uint]string{}, map[uint]Tenant{}
 	for _, t := range ts {
 		names[t.ID] = t.Name
+		info[t.ID] = t
 		for _, d := range t.Domains {
 			hosts[d.Host] = hostInfo{id: t.ID, active: t.IsActive}
 		}
 	}
 	s.mu.Lock()
-	s.hosts, s.names, s.loaded = hosts, names, time.Now()
+	s.hosts, s.names, s.info, s.loaded = hosts, names, info, time.Now()
 	s.mu.Unlock()
 }
 
@@ -204,6 +212,20 @@ func (s *Store) Resolve(host string) (id uint, active, ok bool) {
 		hi, ok = s.hosts[strings.TrimPrefix(host, "www.")]
 	}
 	return hi.id, hi.active, ok
+}
+
+// Info is a centre with its addresses and mail settings, from the list kept in memory.
+func (s *Store) Info(id uint) (Tenant, bool) {
+	s.mu.RLock()
+	fresh := time.Since(s.loaded) < hostsTTL
+	s.mu.RUnlock()
+	if !fresh {
+		s.reload()
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	t, ok := s.info[id]
+	return t, ok
 }
 
 // Name is a centre's name.
@@ -330,6 +352,40 @@ func (s *Store) Update(id uint, name string, active bool, hosts []string) (*Tena
 	}
 	s.Invalidate()
 	return &t, nil
+}
+
+// Mail is a centre's own mail settings; an empty Password keeps the saved one.
+type Mail struct {
+	Host     string `json:"host"`
+	Port     string `json:"port"`
+	User     string `json:"user"`
+	Password string `json:"password"`
+	From     string `json:"from"`
+	FromName string `json:"from_name"`
+}
+
+// SetMail saves a centre's mail settings.
+func (s *Store) SetMail(id uint, m Mail) error {
+	up := map[string]interface{}{
+		"smtp_host": strings.TrimSpace(m.Host), "smtp_port": strings.TrimSpace(m.Port), "smtp_user": strings.TrimSpace(m.User),
+		"smtp_from": strings.TrimSpace(m.From), "smtp_from_name": strings.TrimSpace(m.FromName),
+	}
+	if m.Password != "" {
+		up["smtp_password"] = m.Password
+	}
+	if strings.TrimSpace(m.Host) == "" {
+		up["smtp_password"] = ""
+	}
+	err := s.System.Model(&Tenant{}).Where("id = ?", id).Updates(up).Error
+	s.Invalidate()
+	return err
+}
+
+// Get is one centre.
+func (s *Store) Get(id uint) (Tenant, error) {
+	var t Tenant
+	err := s.System.Preload("Domains").First(&t, id).Error
+	return t, err
 }
 
 // List is every centre with its addresses.

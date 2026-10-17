@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
+	"educationcenter/internal/security"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"educationcenter/internal/security"
 	"gorm.io/gorm"
 )
 
@@ -50,6 +50,9 @@ type UserInfo struct {
 	StudentID   *uint               `json:"student_id,omitempty"`
 	GuardianID  *uint               `json:"guardian_id,omitempty"`
 	BranchID    *uint               `json:"branch_id,omitempty"`
+	Phone       string              `json:"phone"`
+	EmailNotif  bool                `json:"email_notifications"`
+	Provider    string              `json:"provider"`
 	Permissions map[string][]string `json:"permissions"`
 }
 
@@ -105,6 +108,23 @@ func (h *Handler) JWTAuth() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		// Hesab deaktiv edilibsə və ya sessiyalar bağlanıbsa (parol dəyişdi) — token keçmir
+		db, err := h.tenantDB(c)
+		if err != nil {
+			c.JSON(500, gin.H{"error": "Database error"})
+			c.Abort()
+			return
+		}
+		var acc struct {
+			IsActive          bool
+			SessionsValidFrom *time.Time
+		}
+		if db.Model(&EduUser{}).Select("is_active, sessions_valid_from").Where("id = ?", claims.UserID).Scan(&acc).RowsAffected == 0 ||
+			!acc.IsActive || sessionRevoked(acc.SessionsValidFrom, claims) {
+			c.JSON(401, gin.H{"error": "Sessiya bitib — yenidən daxil olun"})
+			c.Abort()
+			return
+		}
 
 		c.Set("userID", claims.UserID)
 		c.Set("userEmail", claims.Email)
@@ -121,12 +141,10 @@ func (h *Handler) JWTAuth() gin.HandlerFunc {
 
 		// Alt rol varsa icazeleri DB-den oxu (icaze daraldilmasi ucun)
 		if claims.SubRoleID != nil {
-			if db, err := h.tenantDB(c); err == nil {
-				var sr SubRole
-				if db.Where("id = ? AND is_active = ?", *claims.SubRoleID, true).First(&sr).Error == nil {
-					if perms := ParseSubRolePermissions(sr.Permissions); perms != nil {
-						c.Set("subRolePerms", perms)
-					}
+			var sr SubRole
+			if db.Where("id = ? AND is_active = ?", *claims.SubRoleID, true).First(&sr).Error == nil {
+				if perms := ParseSubRolePermissions(sr.Permissions); perms != nil {
+					c.Set("subRolePerms", perms)
 				}
 			}
 		}
@@ -169,7 +187,7 @@ func currentSubRolePerms(c *gin.Context) map[string][]string {
 func (h *Handler) Login(c *gin.Context) {
 	var req LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "E-poct ve sifre teleb olunur"})
+		c.JSON(400, gin.H{"error": "E-poçt və parol tələb olunur"})
 		return
 	}
 
@@ -180,24 +198,42 @@ func (h *Handler) Login(c *gin.Context) {
 	}
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
+	key, ip := accountKey(c, email), c.ClientIP()
+	if d := loginByAccount.blocked(key); d > 0 {
+		c.JSON(429, gin.H{"error": lockedMessage(d)})
+		return
+	}
+	if d := loginByIP.blocked(ip); d > 0 {
+		c.JSON(429, gin.H{"error": lockedMessage(d)})
+		return
+	}
 
 	var user EduUser
-	if err := db.Where("email = ? AND is_active = ?", email, true).First(&user).Error; err != nil {
-		c.JSON(401, gin.H{"error": "E-poct ve ya sifre yanlisdir"})
+	found := db.Where("LOWER(email) = ?", email).First(&user).Error == nil
+	if !found || !security.CheckPassword(req.Password, user.PasswordHash) {
+		loginByAccount.fail(key)
+		loginByIP.fail(ip)
+		var uid *uint
+		if found {
+			uid = &user.ID
+		}
+		auditAs(c, db, uid, email, "login_failed", "auth", uid, "")
+		c.JSON(401, gin.H{"error": "E-poçt və ya parol yanlışdır"})
 		return
 	}
-
-	if !security.CheckPassword(req.Password, user.PasswordHash) {
-		c.JSON(401, gin.H{"error": "E-poct ve ya sifre yanlisdir"})
+	if !user.IsActive {
+		c.JSON(403, gin.H{"error": "Hesabınız deaktiv edilib — mərkəzin administrasiyası ilə əlaqə saxlayın"})
 		return
 	}
+	loginByAccount.reset(key)
 
 	db.Model(&user).Update("last_login", time.Now())
 	ensureUserCode(db, &user)
+	auditAs(c, db, &user.ID, user.Email, "login", "auth", &user.ID, "")
 
 	signed, err := issueToken(&user)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Token yaradila bilmedi"})
+		c.JSON(500, gin.H{"error": "Token yaradıla bilmədi"})
 		return
 	}
 
@@ -222,7 +258,10 @@ func (h *Handler) GetMe(c *gin.Context) {
 	// Rol/status deyisibse (admin elave edib) yeni token ver
 	if currentRole(c) != tokenRole(&user) {
 		if t, err := issueToken(&user); err == nil {
-			c.JSON(200, gin.H{"id": info.ID, "email": info.Email, "name": info.Name, "display_name": info.DisplayName, "role": info.Role, "avatar": info.Avatar, "code": info.Code, "status": info.Status, "teacher_id": info.TeacherID, "student_id": info.StudentID, "guardian_id": info.GuardianID, "branch_id": info.BranchID, "sub_role_id": info.SubRoleID, "permissions": info.Permissions, "token": t})
+			c.JSON(200, struct {
+				UserInfo
+				Token string `json:"token"`
+			}{info, t})
 			return
 		}
 	}
@@ -258,6 +297,9 @@ func (h *Handler) userInfo(db *gorm.DB, u *EduUser) UserInfo {
 		StudentID:   u.StudentID,
 		GuardianID:  u.GuardianID,
 		BranchID:    u.BranchID,
+		Phone:       u.Phone,
+		EmailNotif:  u.EmailNotifications,
+		Provider:    u.Provider,
 		Permissions: func() map[string][]string {
 			if tokenRole(u) == "pending" {
 				return map[string][]string{}
@@ -279,33 +321,46 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 	}
 
 	var req struct {
-		CurrentPassword string `json:"current_password" binding:"required"`
-		NewPassword     string `json:"new_password" binding:"required,min=6"`
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Cari ve yeni sifre teleb olunur (min 6 simvol)"})
+	c.ShouldBindJSON(&req)
+	if p := passwordProblem(req.NewPassword); p != "" {
+		c.JSON(400, gin.H{"error": p})
 		return
 	}
 
 	var user EduUser
 	if err := db.First(&user, currentUserID(c)).Error; err != nil {
-		c.JSON(404, gin.H{"error": "Istifadeci tapilmadi"})
+		c.JSON(404, gin.H{"error": "İstifadəçi tapılmadı"})
 		return
 	}
 
+	key := accountKey(c, strings.ToLower(user.Email))
+	if d := loginByAccount.blocked(key); d > 0 {
+		c.JSON(429, gin.H{"error": lockedMessage(d)})
+		return
+	}
 	if !security.CheckPassword(req.CurrentPassword, user.PasswordHash) {
-		c.JSON(401, gin.H{"error": "Cari sifre yanlisdir"})
+		loginByAccount.fail(key)
+		c.JSON(400, gin.H{"error": "Cari parol yanlışdır"})
 		return
 	}
 
 	hash, err := security.HashPassword(req.NewPassword)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Sifre hazirlanarken xeta"})
+		c.JSON(500, gin.H{"error": "Parol hazırlanarkən xəta"})
 		return
 	}
 
-	db.Model(&user).Update("password_hash", hash)
-	c.JSON(200, gin.H{"success": true})
+	now := time.Now()
+	db.Model(&user).Updates(map[string]interface{}{"password_hash": hash, "sessions_valid_from": now})
+	user.SessionsValidFrom = &now
+	sendTemplate(db, "password_changed", user.Email, &user.ID, map[string]string{"name": firstNonEmpty(user.DisplayName, user.Name)})
+	audit(c, db, "password_changed", "users", &user.ID, "")
+	// bu cihaz girişdə qalır, digərləri çıxır
+	tok, _ := issueToken(&user)
+	c.JSON(200, gin.H{"success": true, "token": tok})
 }
 
 // SetupPassword - dəvət linki ile ilk sifrenin teyini (public)
@@ -317,11 +372,16 @@ func (h *Handler) SetupPassword(c *gin.Context) {
 	}
 
 	var req struct {
-		Token    string `json:"token" binding:"required"`
-		Password string `json:"password" binding:"required,min=6"`
+		Token    string `json:"token"`
+		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Token ve sifre teleb olunur (min 6 simvol)"})
+	c.ShouldBindJSON(&req)
+	if p := passwordProblem(req.Password); p != "" {
+		c.JSON(400, gin.H{"error": p})
+		return
+	}
+	if strings.TrimSpace(req.Token) == "" {
+		c.JSON(400, gin.H{"error": "Link etibarsızdır"})
 		return
 	}
 
@@ -343,10 +403,12 @@ func (h *Handler) SetupPassword(c *gin.Context) {
 	}
 
 	db.Model(&user).Updates(map[string]interface{}{
-		"password_hash":      hash,
-		"setup_token":        "",
-		"setup_token_expiry": nil,
+		"password_hash":       hash,
+		"setup_token":         "",
+		"setup_token_expiry":  nil,
+		"sessions_valid_from": time.Now(),
 	})
+	auditAs(c, db, &user.ID, user.Email, "password_set", "users", &user.ID, "dəvət linki")
 
 	c.JSON(200, gin.H{"success": true, "email": user.Email})
 }
@@ -512,7 +574,7 @@ func (h *Handler) CreateUser(c *gin.Context) {
 		BranchID:   req.BranchID,
 		Phone:      req.Phone,
 		IsActive:   true,
-		TenantID:  tenantID,
+		TenantID:   tenantID,
 	}
 
 	// Rola uygun profil avtomatik yaradilir/baglanir.
@@ -526,6 +588,10 @@ func (h *Handler) CreateUser(c *gin.Context) {
 
 	var setupURL string
 	if req.Password != "" {
+		if p := passwordProblem(req.Password); p != "" {
+			c.JSON(400, gin.H{"error": p})
+			return
+		}
 		hash, err := security.HashPassword(req.Password)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Sifre hazirlanarken xeta"})
@@ -550,7 +616,9 @@ func (h *Handler) CreateUser(c *gin.Context) {
 	resp := gin.H{"user": h.userInfo(db, &user)}
 	if setupURL != "" {
 		resp["setup_url"] = setupURL
+		resp["email_status"] = sendInvitation(db, &user, setupURL)
 	}
+	audit(c, db, "user_created", "users", &user.ID, user.Email+" ("+user.Role+")")
 	c.JSON(201, resp)
 }
 
@@ -699,11 +767,11 @@ func (h *Handler) CreateAccountForProfile(c *gin.Context) {
 
 	tenantID := c.MustGet("tenantID").(uint)
 	user := EduUser{
-		Name:      name,
-		Email:     email,
-		Role:      req.Kind,
-		Phone:     phone,
-		IsActive:  true,
+		Name:     name,
+		Email:    email,
+		Role:     req.Kind,
+		Phone:    phone,
+		IsActive: true,
 		TenantID: tenantID,
 	}
 	switch req.Kind {
@@ -720,6 +788,10 @@ func (h *Handler) CreateAccountForProfile(c *gin.Context) {
 
 	var setupURL string
 	if req.Password != "" {
+		if p := passwordProblem(req.Password); p != "" {
+			c.JSON(400, gin.H{"error": p})
+			return
+		}
 		hash, err := security.HashPassword(req.Password)
 		if err != nil {
 			c.JSON(500, gin.H{"error": "Şifrə hazırlanarken xeta"})
@@ -744,7 +816,9 @@ func (h *Handler) CreateAccountForProfile(c *gin.Context) {
 	resp := gin.H{"success": true, "user": h.userInfo(db, &user)}
 	if setupURL != "" {
 		resp["setup_url"] = setupURL
+		resp["email_status"] = sendInvitation(db, &user, setupURL)
 	}
+	audit(c, db, "user_created", "users", &user.ID, user.Email+" ("+user.Role+")")
 	c.JSON(201, resp)
 }
 
@@ -783,6 +857,16 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 			return
 		}
 	}
+	if parseUint(c.Param("id")) == currentUserID(c) {
+		if a, ok := patch["is_active"].(bool); ok && !a {
+			c.JSON(400, gin.H{"error": "Öz hesabınızı deaktiv edə bilməzsiniz"})
+			return
+		}
+		if r, ok := patch["role"].(string); ok && r != RoleAdmin {
+			c.JSON(400, gin.H{"error": "Öz admin rolunuzu dəyişə bilməzsiniz"})
+			return
+		}
+	}
 
 	if err := db.Model(&EduUser{}).Where("id = ?", c.Param("id")).Updates(patch).Error; err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
@@ -791,6 +875,11 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 
 	var user EduUser
 	db.First(&user, c.Param("id"))
+	keys := make([]string, 0, len(patch))
+	for k := range patch {
+		keys = append(keys, k)
+	}
+	audit(c, db, "user_updated", "users", &user.ID, user.Email+": "+strings.Join(keys, ", "))
 	c.JSON(200, h.userInfo(db, &user))
 }
 
@@ -802,10 +891,11 @@ func (h *Handler) ResetUserPassword(c *gin.Context) {
 	}
 
 	var req struct {
-		Password string `json:"password" binding:"required,min=6"`
+		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Sifre teleb olunur (min 6 simvol)"})
+	c.ShouldBindJSON(&req)
+	if p := passwordProblem(req.Password); p != "" {
+		c.JSON(400, gin.H{"error": p})
 		return
 	}
 
@@ -822,10 +912,13 @@ func (h *Handler) ResetUserPassword(c *gin.Context) {
 	}
 
 	db.Model(&user).Updates(map[string]interface{}{
-		"password_hash":      hash,
-		"setup_token":        "",
-		"setup_token_expiry": nil,
+		"password_hash":       hash,
+		"setup_token":         "",
+		"setup_token_expiry":  nil,
+		"sessions_valid_from": time.Now(),
 	})
+	sendTemplate(db, "password_changed", user.Email, &user.ID, map[string]string{"name": firstNonEmpty(user.DisplayName, user.Name)})
+	audit(c, db, "password_set_by_admin", "users", &user.ID, user.Email)
 	c.JSON(200, gin.H{"success": true})
 }
 
@@ -841,11 +934,21 @@ func (h *Handler) DeleteUser(c *gin.Context) {
 		return
 	}
 
+	var victim EduUser
+	db.First(&victim, c.Param("id"))
 	if err := db.Delete(&EduUser{}, c.Param("id")).Error; err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	audit(c, db, "user_deleted", "users", &victim.ID, victim.Email)
 	c.JSON(200, gin.H{"success": true})
+}
+
+// sendInvitation - "Dəvət" məktubu: istifadəçi linklə parolunu təyin edir.
+func sendInvitation(db *gorm.DB, u *EduUser, setupURL string) string {
+	return sendTemplate(db, "invitation", u.Email, &u.ID, map[string]string{
+		"name": firstNonEmpty(u.DisplayName, u.Name), "email": u.Email, "link": setupURL,
+	})
 }
 
 func parseUint(s string) uint {

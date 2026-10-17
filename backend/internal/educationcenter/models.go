@@ -118,6 +118,10 @@ type EduUser struct {
 	Provider   string  `json:"provider" gorm:"size:20;default:password"`   // password | google
 	GoogleSub  string  `json:"-" gorm:"size:64;index"`
 	RoleChosen bool    `json:"role_chosen" gorm:"default:true"`
+
+	// Təhlükəsizlik və seçimlər
+	SessionsValidFrom  *time.Time `json:"-"`                                       // bundan əvvəl verilmiş tokenlər keçərsizdir (parol dəyişdi, "hər yerdən çıx")
+	EmailNotifications bool       `json:"email_notifications" gorm:"default:true"` // bildirişlər e-poçtla da gəlsin
 }
 
 // TeacherStudent - muellim ↔ sagird birbasa elaqesi (qrupdan asili olmayaraq).
@@ -548,6 +552,7 @@ type Announcement struct {
 	PublishedAt     *time.Time     `json:"published_at"`
 	ExpiresAt       *time.Time     `json:"expires_at"`
 	CreatedBy       *uint          `json:"created_by"`
+	NotifiedAt      *time.Time     `json:"notified_at"` // dərc olunanda hədəf istifadəçilərə bildiriş getdi
 }
 
 func (Announcement) TableName() string { return "edu_announcements" }
@@ -713,6 +718,8 @@ func Models() []interface{} {
 		&XPEvent{}, &Achievement{}, &StudentAchievement{},
 		// 9. Tenzimlemeler
 		&Setting{},
+		// 10. E-poct ve tehlukesizlik
+		&EmailTemplate{}, &EmailLog{}, &PasswordReset{}, &AuditLog{},
 	}
 }
 

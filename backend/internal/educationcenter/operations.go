@@ -114,22 +114,10 @@ func nextStudentCode(db *gorm.DB) string {
 // pushNotification - bildiriş yazır. Səssizcə uğursuz olur:
 // bildiriş çatmasa da əsas əməliyyat pozulmamalıdır.
 func pushNotification(db *gorm.DB, userID uint, kind, title, body, link, refType string, refID *uint, priority string) {
-	if userID == 0 {
-		return
-	}
-	if priority == "" {
-		priority = "normal"
-	}
-	db.Create(&Notification{
-		UserID:   userID,
-		Type:     kind,
-		Title:    title,
-		Body:     body,
-		Link:     link,
-		RefType:  refType,
-		RefID:    refID,
-		Priority: priority,
-	})
+	createNotification(db, Notification{
+		UserID: userID, Type: kind, Title: title, Body: body, Link: link,
+		RefType: refType, RefID: refID, Priority: priority,
+	}, true)
 }
 
 // notifyAboutStudent - şagirdlə bağlı xəbəri həm şagirdin özünə,

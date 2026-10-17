@@ -285,6 +285,8 @@ func RegisterResources(sf *gin.RouterGroup, h *Handler) {
 		Sortable:     []string{"published_at", "created_at"},
 		DefaultOrder: "created_at DESC",
 		Scope:        scopeAnnouncements,
+		AfterCreate:  announcementPublished,
+		AfterUpdate:  announcementPublished,
 	})
 
 	RegisterCRUD(sf, h, Resource[Notification]{

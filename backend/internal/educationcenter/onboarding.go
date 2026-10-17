@@ -10,9 +10,9 @@ import (
 	"strings"
 	"time"
 
+	"educationcenter/internal/security"
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
-	"educationcenter/internal/security"
 	"gorm.io/gorm"
 )
 
@@ -137,12 +137,21 @@ func (h *Handler) googleClientID(db *gorm.DB) string {
 // POST /auth/register {name,email,password}
 func (h *Handler) Register(c *gin.Context) {
 	var req struct {
-		Name     string `json:"name" binding:"required"`
-		Email    string `json:"email" binding:"required"`
-		Password string `json:"password" binding:"required,min=6"`
+		Name     string `json:"name"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
 	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{"error": "Ad, e-poct ve sifre (minimum 6 simvol) teleb olunur"})
+	c.ShouldBindJSON(&req)
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Email) == "" {
+		c.JSON(400, gin.H{"error": "Ad, e-poçt və parol tələb olunur"})
+		return
+	}
+	if p := passwordProblem(req.Password); p != "" {
+		c.JSON(400, gin.H{"error": p})
+		return
+	}
+	if !registerByIP.allow(c.ClientIP()) {
+		c.JSON(429, gin.H{"error": "Bu ünvandan çox sayda qeydiyyat oldu. Bir az sonra yenidən yoxlayın."})
 		return
 	}
 	db, err := h.tenantDB(c)
@@ -157,9 +166,9 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 	var n int64
-	db.Model(&EduUser{}).Where("email = ?", email).Count(&n)
+	db.Model(&EduUser{}).Where("LOWER(email) = ?", email).Count(&n)
 	if n > 0 {
-		c.JSON(409, gin.H{"error": "Bu e-poct artiq qeydiyyatdan kecib — daxil olun"})
+		c.JSON(409, gin.H{"error": "Bu e-poçt artıq qeydiyyatdan keçib — daxil olun və ya parolu bərpa edin"})
 		return
 	}
 	hash, err := security.HashPassword(req.Password)
@@ -176,7 +185,14 @@ func (h *Handler) Register(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	h.welcome(c, db, &u)
 	h.respondSession(c, db, &u, 201)
+}
+
+// welcome - yeni qeydiyyat: xoş gəldin məktubu + audit.
+func (h *Handler) welcome(c *gin.Context, db *gorm.DB, u *EduUser) {
+	sendTemplate(db, "welcome", u.Email, &u.ID, map[string]string{"name": firstNonEmpty(u.DisplayName, u.Name), "email": u.Email, "link": siteURL(c) + "/login"})
+	auditAs(c, db, &u.ID, u.Email, "registered", "auth", &u.ID, u.Provider)
 }
 
 // POST /auth/google {credential} — Google ID token
@@ -259,6 +275,7 @@ func (h *Handler) GoogleAuth(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	h.welcome(c, db, &u)
 	h.respondSession(c, db, &u, 201)
 }
 
@@ -309,6 +326,11 @@ func (h *Handler) ChooseRole(c *gin.Context) {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	if status == StatusPending {
+		notifyAdmins(db, "registration", "Yeni qeydiyyat təsdiq gözləyir",
+			u.Name+" ("+u.Email+") "+roleLabelAz[u.Role]+" kimi qoşulmaq istəyir. İstifadəçilər bölməsində təsdiqləyin və ya 6 rəqəmli kodu ilə əlavə edin.",
+			"users", u.ID)
+	}
 	h.respondSession(c, db, &u, 200)
 }
 
@@ -320,7 +342,18 @@ func (h *Handler) activate(db *gorm.DB, u *EduUser, branchID *uint) error {
 		return err
 	}
 	u.Status = StatusActive
-	return db.Save(u).Error
+	if err := db.Save(u).Error; err != nil {
+		return err
+	}
+	// İstifadəçiyə xəbər: paneldə bildiriş və "Hesab təsdiqləndi" məktubu (ayrıca bildiriş məktubu getmir)
+	createNotification(db, Notification{UserID: u.ID, Type: "account_approved", Title: "Hesabınız təsdiqləndi",
+		Body: "Artıq panelinizin bütün imkanlarından istifadə edə bilərsiniz."}, false)
+	link := ""
+	if base := CentreURL(tenantOf(db)); base != "" {
+		link = base + "/login"
+	}
+	sendTemplate(db, "account_approved", u.Email, &u.ID, map[string]string{"name": firstNonEmpty(u.DisplayName, u.Name), "link": link})
+	return nil
 }
 
 // POST /sf/auth/add-by-code {code}

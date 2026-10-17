@@ -3,6 +3,7 @@ package educationcenter
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"educationcenter/internal/security"
 	"gorm.io/gorm"
@@ -34,8 +35,8 @@ func Prepare(db *gorm.DB, tenantID uint) error {
 // CreateAdmin opens an admin account in the centre (the super admin panel's "Admin əlavə et").
 func CreateAdmin(db *gorm.DB, tenantID uint, name, email, password string) (*EduUser, error) {
 	name, email = strings.TrimSpace(name), strings.ToLower(strings.TrimSpace(email))
-	if name == "" || email == "" || len(password) < 6 {
-		return nil, errors.New("ad, e-poçt və ən azı 6 simvolluq parol lazımdır")
+	if name == "" || email == "" || passwordProblem(password) != "" {
+		return nil, errors.New("ad, e-poçt və ən azı 8 simvolluq parol lazımdır")
 	}
 	var n int64
 	db.Model(&EduUser{}).Where("LOWER(email) = ?", email).Count(&n)
@@ -75,8 +76,8 @@ func Status(db *gorm.DB) map[string]int64 {
 
 // SetPassword gives a centre user a new password (the super admin's "reset password").
 func SetPassword(db *gorm.DB, email, password string) error {
-	if len(password) < 6 {
-		return errors.New("parol ən azı 6 simvol olmalıdır")
+	if p := passwordProblem(password); p != "" {
+		return errors.New(p)
 	}
 	var u EduUser
 	if db.Where("LOWER(email) = ?", strings.ToLower(strings.TrimSpace(email))).First(&u).Error != nil {
@@ -86,5 +87,5 @@ func SetPassword(db *gorm.DB, email, password string) error {
 	if err != nil {
 		return err
 	}
-	return db.Model(&u).Updates(map[string]interface{}{"password_hash": hash, "is_active": true}).Error
+	return db.Model(&u).Updates(map[string]interface{}{"password_hash": hash, "is_active": true, "sessions_valid_from": time.Now()}).Error
 }
