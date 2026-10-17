@@ -343,6 +343,7 @@ func TestMailAuthNotifications(t *testing.T) {
 		t.Fatalf("super users: %v", users)
 	}
 	c.must(200, "PUT", panel, fmt.Sprintf("%s/users/%d", tp, int(taraID)), st, map[string]bool{"is_active": true})
+	c.must(400, "PUT", panel, fmt.Sprintf("%s/users/%d", tp, int(bossID)), st, map[string]bool{"is_active": false}) // the last active admin stays
 	c.must(200, "POST", panel, fmt.Sprintf("%s/users/%d/reset-link", tp, int(taraID)), st, nil)
 	smtp.wait(t, "tara@m.test", "Parolun bərpası")
 	logs := c.must(200, "GET", panel, tp+"/email-log", st, nil)["data"].([]interface{})

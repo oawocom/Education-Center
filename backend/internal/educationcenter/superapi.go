@@ -48,6 +48,17 @@ func Users(db *gorm.DB, q, role string) []UserRow {
 
 // SetActive - hesabı aktiv / deaktiv edir (deaktiv hesabın sessiyaları dərhal keçərsiz olur).
 func SetActive(db *gorm.DB, userID uint, active bool) error {
+	var u EduUser
+	if db.First(&u, userID).Error != nil {
+		return errors.New("istifadəçi tapılmadı")
+	}
+	if !active && u.Role == RoleAdmin && u.IsActive {
+		var n int64
+		db.Model(&EduUser{}).Where("role = ? AND is_active = ? AND id <> ?", RoleAdmin, true, u.ID).Count(&n)
+		if n == 0 {
+			return errors.New("bu, mərkəzin son aktiv adminidir — əvvəlcə başqa admin əlavə edin")
+		}
+	}
 	res := db.Model(&EduUser{}).Where("id = ?", userID).Update("is_active", active)
 	if res.Error != nil {
 		return res.Error
