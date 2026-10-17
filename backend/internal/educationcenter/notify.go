@@ -120,22 +120,74 @@ func announcementPublished(c *gin.Context, db *gorm.DB, m *Announcement) error {
 		return nil
 	}
 	m.NotifiedAt = &now
-	var roles []string
-	if len(m.TargetRoles) > 0 {
-		json.Unmarshal(m.TargetRoles, &roles)
-	}
-	q := db.Model(&EduUser{}).Where("is_active = ? AND status = ? AND role_chosen = ? AND id <> ?", true, StatusActive, true, currentUserID(c))
-	if len(roles) > 0 {
-		q = q.Where("role IN ?", roles)
-	}
 	var ids []uint
-	q.Pluck("id", &ids)
+	announcementAudience(db, m, currentUserID(c)).Pluck("id", &ids)
 	body := trimTo(m.Body, 300)
 	for _, id := range ids {
 		aid := m.ID
 		createNotification(db, Notification{UserID: id, Type: "announcement", Title: m.Title, Body: body, Link: "announcements", RefType: "announcement", RefID: &aid}, true)
 	}
 	return nil
+}
+
+// jsonIDs - [1,2] və ya ["1","2"] şəklində id siyahısı.
+func jsonIDs(raw []byte) []uint {
+	var xs []interface{}
+	if len(raw) == 0 || json.Unmarshal(raw, &xs) != nil {
+		return nil
+	}
+	var out []uint
+	for _, x := range xs {
+		switch v := x.(type) {
+		case float64:
+			if v > 0 {
+				out = append(out, uint(v))
+			}
+		case string:
+			if n := parseUint(strings.TrimSpace(v)); n > 0 {
+				out = append(out, n)
+			}
+		}
+	}
+	return out
+}
+
+// announcementAudience - elanın hədəfi: rollar, qruplar (şagird, onun valideynləri, qrupun
+// müəllimi) və filiallar (filialın istifadəçiləri, şagirdləri, valideynləri, müəllimləri).
+func announcementAudience(db *gorm.DB, m *Announcement, except uint) *gorm.DB {
+	var roles []string
+	var groups, branches []uint
+	if len(m.TargetRoles) > 0 {
+		json.Unmarshal(m.TargetRoles, &roles)
+	}
+	groups, branches = jsonIDs(m.TargetGroupIDs), jsonIDs(m.TargetBranchIDs)
+	q := db.Model(&EduUser{}).Where("is_active = ? AND status = ? AND role_chosen = ? AND id <> ?", true, StatusActive, true, except)
+	if len(roles) > 0 {
+		q = q.Where("role IN ?", roles)
+	}
+	var conds []string
+	var args []interface{}
+	if len(groups) > 0 {
+		inGroups := "SELECT student_id FROM edu_enrollments WHERE group_id IN ? AND status = 'active'"
+		conds = append(conds,
+			"student_id IN ("+inGroups+")",
+			"guardian_id IN (SELECT guardian_id FROM edu_student_guardians WHERE student_id IN ("+inGroups+"))",
+			"teacher_id IN (SELECT teacher_id FROM edu_groups WHERE id IN ? AND teacher_id IS NOT NULL)")
+		args = append(args, groups, groups, groups)
+	}
+	if len(branches) > 0 {
+		inBranch := "SELECT id FROM edu_students WHERE branch_id IN ?"
+		conds = append(conds,
+			"branch_id IN ?",
+			"student_id IN ("+inBranch+")",
+			"guardian_id IN (SELECT guardian_id FROM edu_student_guardians WHERE student_id IN ("+inBranch+"))",
+			"teacher_id IN (SELECT id FROM edu_teachers WHERE branch_id IN ?)")
+		args = append(args, branches, branches, branches, branches)
+	}
+	if len(conds) > 0 {
+		q = q.Where("("+strings.Join(conds, " OR ")+")", args...)
+	}
+	return q
 }
 
 // ============================================================

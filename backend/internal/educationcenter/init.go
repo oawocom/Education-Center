@@ -43,8 +43,9 @@ func RegisterRoutes(api *gin.RouterGroup, getDB func(uint) (*gorm.DB, error)) {
 			sf.POST("/inbox/read", h.InboxRead)
 
 			// E-poçt şablonları, məktub jurnalı, audit — yalnız admin
+			// (alt rolu "Tənzimləmələr"i dəyişə bilməyən admin bura girmir)
 			mail := sf.Group("/email")
-			mail.Use(RequireRole(RoleAdmin))
+			mail.Use(RequireRole(RoleAdmin), RequirePerm("settings", ActionUpdate))
 			{
 				mail.GET("/templates", h.ListEmailTemplates)
 				mail.PUT("/templates/:key", h.SaveEmailTemplate)
@@ -52,7 +53,7 @@ func RegisterRoutes(api *gin.RouterGroup, getDB func(uint) (*gorm.DB, error)) {
 				mail.POST("/templates/:key/test", h.TestEmailTemplate)
 				mail.GET("/log", h.EmailLogList)
 			}
-			sf.GET("/audit", RequireRole(RoleAdmin), h.AuditList)
+			sf.GET("/audit", RequireRole(RoleAdmin), RequirePerm("users", ActionRead), h.AuditList)
 			sf.POST("/auth/choose-role", h.ChooseRole)
 			sf.POST("/auth/add-by-code", RequireRole(RoleAdmin), h.AddByCode)
 			sf.GET("/auth/pending", RequireRole(RoleAdmin), h.ListPending)

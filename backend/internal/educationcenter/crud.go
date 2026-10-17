@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -24,7 +25,13 @@ func NewHandler(getDB func(uint) (*gorm.DB, error)) *Handler {
 	return &Handler{getDB: getDB}
 }
 
-var migratedTenants sync.Map
+// prepared - hər mərkəz üçün: baza bu prosesdə yenilənibmi (eyni anda gələn sorğular gözləyir).
+type prepState struct {
+	mu   sync.Mutex
+	done atomic.Bool
+}
+
+var prepared sync.Map
 
 // tenantDB - the centre's own database. Once per process for each centre
 // Prepare brings it up to date, so new columns and tables (grade, homework,
@@ -40,13 +47,23 @@ func (h *Handler) tenantDB(c *gin.Context) (*gorm.DB, error) {
 }
 
 // Ensure - mərkəzin bazası bu prosesdə hələ yenilənməyibsə, Prepare edir (bir dəfə).
+// Yenilənmə gedərkən gələn sorğular onun bitməsini gözləyir; alınmasa, növbəti sorğu yenə cəhd edir.
 func Ensure(db *gorm.DB, tenantID uint) {
-	if _, done := migratedTenants.LoadOrStore(tenantID, true); !done {
-		if merr := Prepare(db, tenantID); merr != nil {
-			log.Printf("[education-center] prepare tenant %d: %v", tenantID, merr)
-			migratedTenants.Delete(tenantID)
-		}
+	v, _ := prepared.LoadOrStore(tenantID, &prepState{})
+	st := v.(*prepState)
+	if st.done.Load() {
+		return
 	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.done.Load() {
+		return
+	}
+	if err := Prepare(db, tenantID); err != nil {
+		log.Printf("[education-center] prepare tenant %d: %v", tenantID, err)
+		return
+	}
+	st.done.Store(true)
 }
 
 // ============================================================

@@ -192,7 +192,7 @@ func sendTemplate(db *gorm.DB, key, to string, userID *uint, vars map[string]str
 	}
 	job := mailJob{db: background(db), mail: m, tenantID: tenantID, to: to, userID: userID, key: key,
 		subject: sub, html: layout(vars["centre"], htmlInner), text: text}
-	if !enqueueMail(job) {
+	if !enqueueMail(job, key != "notification") {
 		writeLog(db, to, userID, key, sub, "failed", "göndəriş növbəsi doludur")
 		return "failed"
 	}

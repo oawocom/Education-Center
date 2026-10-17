@@ -119,8 +119,13 @@ func (h *Handler) JWTAuth() gin.HandlerFunc {
 			IsActive          bool
 			SessionsValidFrom *time.Time
 		}
-		if db.Model(&EduUser{}).Select("is_active, sessions_valid_from").Where("id = ?", claims.UserID).Scan(&acc).RowsAffected == 0 ||
-			!acc.IsActive || sessionRevoked(acc.SessionsValidFrom, claims) {
+		res := db.Model(&EduUser{}).Select("is_active, sessions_valid_from").Where("id = ?", claims.UserID).Scan(&acc)
+		if res.Error != nil {
+			c.JSON(500, gin.H{"error": "Database error"})
+			c.Abort()
+			return
+		}
+		if res.RowsAffected == 0 || !acc.IsActive || sessionRevoked(acc.SessionsValidFrom, claims) {
 			c.JSON(401, gin.H{"error": "Sessiya bitib — yenidən daxil olun"})
 			c.Abort()
 			return
@@ -199,18 +204,21 @@ func (h *Handler) Login(c *gin.Context) {
 
 	email := strings.ToLower(strings.TrimSpace(req.Email))
 	key, ip := accountKey(c, email), c.ClientIP()
-	if d := loginByAccount.blocked(key); d > 0 {
-		c.JSON(429, gin.H{"error": lockedMessage(d)})
-		return
-	}
-	if d := loginByIP.blocked(ip); d > 0 {
-		c.JSON(429, gin.H{"error": lockedMessage(d)})
-		return
+	pair := key + "|" + ip
+	for _, l := range []struct {
+		lim *limiter
+		k   string
+	}{{loginByPair, pair}, {loginByAccount, key}, {loginByIP, ip}} {
+		if d := l.lim.blocked(l.k); d > 0 {
+			c.JSON(429, gin.H{"error": lockedMessage(d)})
+			return
+		}
 	}
 
 	var user EduUser
 	found := db.Where("LOWER(email) = ?", email).First(&user).Error == nil
 	if !found || !security.CheckPassword(req.Password, user.PasswordHash) {
+		loginByPair.fail(pair)
 		loginByAccount.fail(key)
 		loginByIP.fail(ip)
 		var uid *uint
@@ -225,7 +233,7 @@ func (h *Handler) Login(c *gin.Context) {
 		c.JSON(403, gin.H{"error": "Hesabınız deaktiv edilib — mərkəzin administrasiyası ilə əlaqə saxlayın"})
 		return
 	}
-	loginByAccount.reset(key)
+	loginByPair.reset(pair)
 
 	db.Model(&user).Update("last_login", time.Now())
 	ensureUserCode(db, &user)
@@ -336,13 +344,13 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 		return
 	}
 
-	key := accountKey(c, strings.ToLower(user.Email))
-	if d := loginByAccount.blocked(key); d > 0 {
+	key := accountKey(c, strings.ToLower(user.Email)) + "|" + c.ClientIP()
+	if d := loginByPair.blocked(key); d > 0 {
 		c.JSON(429, gin.H{"error": lockedMessage(d)})
 		return
 	}
 	if !security.CheckPassword(req.CurrentPassword, user.PasswordHash) {
-		loginByAccount.fail(key)
+		loginByPair.fail(key)
 		c.JSON(400, gin.H{"error": "Cari parol yanlışdır"})
 		return
 	}
@@ -356,6 +364,7 @@ func (h *Handler) ChangePassword(c *gin.Context) {
 	now := time.Now()
 	db.Model(&user).Updates(map[string]interface{}{"password_hash": hash, "sessions_valid_from": now})
 	user.SessionsValidFrom = &now
+	cancelResets(db, user.ID)
 	sendTemplate(db, "password_changed", user.Email, &user.ID, map[string]string{"name": firstNonEmpty(user.DisplayName, user.Name)})
 	audit(c, db, "password_changed", "users", &user.ID, "")
 	// bu cihaz girişdə qalır, digərləri çıxır
@@ -408,6 +417,7 @@ func (h *Handler) SetupPassword(c *gin.Context) {
 		"setup_token_expiry":  nil,
 		"sessions_valid_from": time.Now(),
 	})
+	cancelResets(db, user.ID)
 	auditAs(c, db, &user.ID, user.Email, "password_set", "users", &user.ID, "dəvət linki")
 
 	c.JSON(200, gin.H{"success": true, "email": user.Email})
@@ -605,7 +615,7 @@ func (h *Handler) CreateUser(c *gin.Context) {
 		user.PasswordHash = tmp
 		user.SetupToken = token
 		user.SetupTokenExpiry = &expiry
-		setupURL = "https://" + requestHost(c) + "/setup-password?token=" + token
+		setupURL = siteURL(c) + "/setup-password?token=" + token
 	}
 
 	if err := db.Create(&user).Error; err != nil {
@@ -805,7 +815,7 @@ func (h *Handler) CreateAccountForProfile(c *gin.Context) {
 		user.PasswordHash = tmp
 		user.SetupToken = token
 		user.SetupTokenExpiry = &expiry
-		setupURL = "https://" + requestHost(c) + "/setup-password?token=" + token
+		setupURL = siteURL(c) + "/setup-password?token=" + token
 	}
 
 	if err := db.Create(&user).Error; err != nil {
@@ -868,10 +878,38 @@ func (h *Handler) UpdateUser(c *gin.Context) {
 		}
 	}
 
+	// Rol, alt rol və ya aktivlik həqiqətən dəyişəndə köhnə token-lər köhnə icazələri daşımasın
+	var cur EduUser
+	if db.First(&cur, parseUint(c.Param("id"))).Error == nil {
+		changed := false
+		if r, ok := patch["role"].(string); ok && r != cur.Role {
+			changed = true
+		}
+		if a, ok := patch["is_active"].(bool); ok && a != cur.IsActive {
+			changed = true
+		}
+		if v, ok := patch["sub_role_id"]; ok {
+			was := uint(0)
+			if cur.SubRoleID != nil {
+				was = *cur.SubRoleID
+			}
+			now := uint(0)
+			if f, isNum := v.(float64); isNum {
+				now = uint(f)
+			}
+			if was != now {
+				changed = true
+			}
+		}
+		if changed {
+			patch["sessions_valid_from"] = time.Now()
+		}
+	}
 	if err := db.Model(&EduUser{}).Where("id = ?", c.Param("id")).Updates(patch).Error; err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
+	delete(patch, "sessions_valid_from")
 
 	var user EduUser
 	db.First(&user, c.Param("id"))
@@ -917,6 +955,7 @@ func (h *Handler) ResetUserPassword(c *gin.Context) {
 		"setup_token_expiry":  nil,
 		"sessions_valid_from": time.Now(),
 	})
+	cancelResets(db, user.ID)
 	sendTemplate(db, "password_changed", user.Email, &user.ID, map[string]string{"name": firstNonEmpty(user.DisplayName, user.Name)})
 	audit(c, db, "password_set_by_admin", "users", &user.ID, user.Email)
 	c.JSON(200, gin.H{"success": true})

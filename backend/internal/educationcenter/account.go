@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -56,8 +57,28 @@ func hashToken(t string) string {
 	return hex.EncodeToString(s[:])
 }
 
-// siteURL - istifadəçinin açdığı ünvan (linklər həmin domenə aparsın).
-func siteURL(c *gin.Context) string { return "https://" + requestHost(c) }
+var reHost = regexp.MustCompile(`^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$`)
+
+// siteURL - istifadəçinin açdığı ünvan (linklər həmin domenə aparsın). Ünvan təmiz host
+// deyilsə (port, istifadəçi adı, qəribə simvol), mərkəzin əsas domeni götürülür.
+func siteURL(c *gin.Context) string {
+	h := strings.ToLower(strings.TrimSpace(requestHost(c)))
+	if i := strings.LastIndex(h, ":"); i >= 0 && !strings.Contains(h, "]") {
+		h = h[:i]
+	}
+	if reHost.MatchString(h) && strings.Contains(h, ".") {
+		return "https://" + h
+	}
+	if u := CentreURL(c.MustGet("tenantID").(uint)); u != "" {
+		return u
+	}
+	return "https://" + h
+}
+
+// cancelResets - istifadəçinin hələ işlənməmiş bərpa linkləri keçərsiz olur.
+func cancelResets(db *gorm.DB, userID uint) {
+	db.Model(&PasswordReset{}).Where("user_id = ? AND used_at IS NULL", userID).Update("used_at", time.Now())
+}
 
 // ---------- uğursuz cəhdlərin sayğacı ----------
 
@@ -139,9 +160,12 @@ func (l *limiter) reset(key string) {
 	l.mu.Unlock()
 }
 
+// Giriş: bir hesaba bir ünvandan 5 səhv → həmin ünvan 15 dəq bloklanır (başqası hesabı
+// bağlaya bilməsin); hesaba hər yerdən cəmi 30 səhv → hesab 15 dəq; bir ünvandan 100 səhv → ünvan.
 var (
-	loginByAccount = newLimiter(5, 15*time.Minute, 15*time.Minute)
-	loginByIP      = newLimiter(40, 15*time.Minute, 15*time.Minute)
+	loginByPair    = newLimiter(5, 15*time.Minute, 15*time.Minute)
+	loginByAccount = newLimiter(30, 15*time.Minute, 15*time.Minute)
+	loginByIP      = newLimiter(100, 15*time.Minute, 15*time.Minute)
 	forgotByEmail  = newLimiter(3, time.Hour, time.Hour)
 	forgotByIP     = newLimiter(20, time.Hour, time.Hour)
 	registerByIP   = newLimiter(60, time.Hour, time.Hour)
@@ -302,6 +326,7 @@ func (h *Handler) ResetPassword(c *gin.Context) {
 		return
 	}
 	loginByAccount.reset(accountKey(c, strings.ToLower(u.Email)))
+	loginByPair.reset(accountKey(c, strings.ToLower(u.Email)) + "|" + c.ClientIP())
 	sendTemplate(db, "password_changed", u.Email, &u.ID, map[string]string{"name": firstNonEmpty(u.DisplayName, u.Name)})
 	auditAs(c, db, &u.ID, u.Email, "password_reset", "users", &u.ID, "")
 	c.JSON(200, gin.H{"success": true, "email": u.Email})

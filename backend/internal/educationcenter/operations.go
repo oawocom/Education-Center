@@ -287,6 +287,11 @@ func (h *Handler) GenerateInvoices(c *gin.Context) {
 	created := 0
 	skipped := 0
 
+	type invoiceNote struct {
+		studentID uint
+		body      string
+	}
+	var notes []invoiceNote
 	err = db.Transaction(func(tx *gorm.DB) error {
 		for i := range tuitions {
 			t := tuitions[i]
@@ -342,10 +347,8 @@ func (h *Handler) GenerateInvoices(c *gin.Context) {
 			}
 			created++
 
-			notifyAboutStudent(tx, t.StudentID, "invoice",
-				period+" dövrü üçün qaimə",
-				fmt.Sprintf("Məbləğ: %.2f %s · Son ödəniş: %s", amount, cur, due.Format("02.01.2006")),
-				"normal")
+			// bildiriş (və məktub) tranzaksiya uğurla bitəndən sonra gedir
+			notes = append(notes, invoiceNote{t.StudentID, fmt.Sprintf("Məbləğ: %.2f %s · Son ödəniş: %s", amount, cur, due.Format("02.01.2006"))})
 		}
 		return nil
 	})
@@ -353,6 +356,9 @@ func (h *Handler) GenerateInvoices(c *gin.Context) {
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
+	}
+	for _, n := range notes {
+		notifyAboutStudent(db, n.studentID, "invoice", period+" dövrü üçün qaimə", n.body, "normal")
 	}
 
 	c.JSON(200, gin.H{"success": true, "created": created, "skipped": skipped, "period": period})

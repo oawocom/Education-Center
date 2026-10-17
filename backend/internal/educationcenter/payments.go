@@ -82,6 +82,9 @@ func (h *Handler) RecordPayment(c *gin.Context) {
 		if inv.Status == "cancelled" {
 			return errors.New("Qaimə ləğv edilib")
 		}
+		if inv.Status == "paid" {
+			return errors.New("Qaimə artıq ödənilmiş kimi işarələnib")
+		}
 		remaining := math.Round((inv.Amount-inv.PaidAmount)*100) / 100
 		if remaining <= 0 {
 			return errors.New("Qaimə artıq tam ödənilib")

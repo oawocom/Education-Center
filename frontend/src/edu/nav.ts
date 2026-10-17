@@ -78,7 +78,7 @@ export const NAV: Record<Role, NavItem[]> = {
     { key: 'users', label: 'İstifadəçilər', emoji: '🔑', resource: 'users', view: 'users', group: 'Sistem' },
     { key: 'sub-roles', label: 'Alt rollar', emoji: '🛡️', resource: 'sub-roles', view: 'crud:sub-roles', group: 'Sistem' },
     { key: 'settings', label: 'Tənzimləmələr', emoji: '⚙️', resource: 'settings', view: 'crud:settings', group: 'Sistem' },
-    { key: 'email', label: 'E-poçt', emoji: '✉️', resource: 'users', view: 'email', group: 'Sistem' },
+    { key: 'email', label: 'E-poçt', emoji: '✉️', resource: 'settings', view: 'email', group: 'Sistem' },
     { key: 'audit', label: 'Audit jurnalı', emoji: '📜', resource: 'users', view: 'audit', group: 'Sistem' },
   ],
 

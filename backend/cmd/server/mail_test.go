@@ -5,8 +5,12 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"mime"
+	"mime/multipart"
 	"net"
+	"net/http/httptest"
+	"net/mail"
 	"os"
 	"regexp"
 	"strings"
@@ -85,13 +89,7 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 				}
 				b.WriteString(l)
 			}
-			data := b.String()
-			subject := ""
-			for _, l := range strings.Split(data, "\r\n") {
-				if strings.HasPrefix(l, "Subject: ") {
-					subject, _ = new(mime.WordDecoder).DecodeHeader(l[9:])
-				}
-			}
+			data, subject := decodeMail(b.String())
 			f.mu.Lock()
 			f.msgs = append(f.msgs, &mailMsg{to: strings.ToLower(to), subject: subject, data: data})
 			f.mu.Unlock()
@@ -103,6 +101,29 @@ func (f *fakeSMTP) serve(conn net.Conn) {
 			w("250 ok")
 		}
 	}
+}
+
+// decodeMail - mövzu və bütün hissələrin (quoted-printable açılmış) mətni.
+func decodeMail(raw string) (string, string) {
+	msg, err := mail.ReadMessage(strings.NewReader(raw))
+	if err != nil {
+		return raw, ""
+	}
+	subject, _ := new(mime.WordDecoder).DecodeHeader(msg.Header.Get("Subject"))
+	_, params, _ := mime.ParseMediaType(msg.Header.Get("Content-Type"))
+	var out strings.Builder
+	out.WriteString("From: " + msg.Header.Get("From") + "\n")
+	mr := multipart.NewReader(msg.Body, params["boundary"])
+	for {
+		part, err := mr.NextPart() // quoted-printable hissələri özü açır
+		if err != nil {
+			break
+		}
+		b, _ := io.ReadAll(part)
+		out.Write(b)
+		out.WriteString("\n")
+	}
+	return out.String(), subject
 }
 
 // wait - "to" ünvanına mövzusunda "subj" olan, hələ götürülməmiş məktub.
@@ -209,6 +230,9 @@ func TestMailAuthNotifications(t *testing.T) {
 		t.Fatalf("invitation: %v", created)
 	}
 	inv := smtp.wait(t, "tara@m.test", "hesabınız yaradıldı")
+	if !strings.Contains(inv.data, `From: "Mail Centre" <noreply@m.test>`) && !strings.Contains(inv.data, `From: Mail Centre <noreply@m.test>`) {
+		t.Fatalf("from header: %q", strings.SplitN(inv.data, "\n", 2)[0])
+	}
 	setup := tokenIn(t, inv)
 	c.must(400, "POST", host, "/api/auth/setup-password", "", map[string]string{"token": setup, "password": "short"})
 	c.must(200, "POST", host, "/api/auth/setup-password", "", map[string]string{"token": setup, "password": "teacherpass1"})
@@ -272,6 +296,16 @@ func TestMailAuthNotifications(t *testing.T) {
 	if n := c.must(200, "GET", host, "/api/sf/inbox", tara, nil)["unread"]; n != float64(1) {
 		t.Fatalf("teacher unread: %v", n)
 	}
+	// qrupa / filiala hədəflənmiş elan yalnız oranın adamlarına
+	branch := c.must(201, "POST", host, "/api/sf/branches", boss, map[string]interface{}{"name": "Filial X"})["id"]
+	taraMe := c.must(200, "GET", host, "/api/sf/auth/me", tara, nil)["id"].(float64)
+	c.must(200, "PUT", host, fmt.Sprintf("/api/sf/users/%d", int(taraMe)), boss, map[string]interface{}{"branch_id": branch})
+	c.must(200, "GET", host, "/api/sf/auth/me", tara, nil) // filial dəyişəndə sessiya bağlanmır
+	c.must(201, "POST", host, "/api/sf/announcements", boss, map[string]interface{}{"title": "Qrup elanı", "body": "x", "status": "published", "target_group_ids": []int{99999}})
+	smtp.none(t, "tara@m.test")
+	c.must(201, "POST", host, "/api/sf/announcements", boss, map[string]interface{}{"title": "Filial elanı", "body": "y", "status": "published", "target_branch_ids": []string{fmt.Sprint(branch)}})
+	smtp.wait(t, "tara@m.test", "Xəbər: Filial elanı")
+	smtp.none(t, "sam@m.test")
 
 	// --- profil: e-poçt bildirişlərini söndürür ---
 	me := c.must(200, "PUT", host, "/api/sf/auth/profile", tara, map[string]interface{}{"email_notifications": false, "phone": "+994 50 000 00 00"})
@@ -281,7 +315,7 @@ func TestMailAuthNotifications(t *testing.T) {
 	taraID := me["id"].(float64)
 	c.must(201, "POST", host, "/api/sf/messages", boss, map[string]interface{}{"to_user_id": taraID, "subject": "Salam", "body": "Necəsiniz?"})
 	smtp.none(t, "tara@m.test")
-	if n := c.must(200, "GET", host, "/api/sf/inbox", tara, nil)["unread"]; n != float64(2) {
+	if n := c.must(200, "GET", host, "/api/sf/inbox", tara, nil)["unread"]; n != float64(3) {
 		t.Fatalf("teacher unread after message: %v", n)
 	}
 
@@ -362,6 +396,27 @@ func TestMailAuthNotifications(t *testing.T) {
 		c.must(401, "POST", host, "/api/auth/login", "", map[string]string{"email": "sam@m.test", "password": "wrong-pass"})
 	}
 	c.must(429, "POST", host, "/api/auth/login", "", map[string]string{"email": "sam@m.test", "password": "studentpass1"})
+	// saxta X-Forwarded-For bloku keçmir
+	spoof := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"email":"sam@m.test","password":"studentpass1"}`))
+	spoof.Host = host
+	spoof.Header.Set("Content-Type", "application/json")
+	spoof.Header.Set("X-Forwarded-For", "9.9.9.9")
+	w := httptest.NewRecorder()
+	c.r.ServeHTTP(w, spoof)
+	if w.Code != 429 {
+		t.Fatalf("spoofed X-Forwarded-For got past the lock: %d", w.Code)
+	}
+	// başqa ünvandan (nginx-in yazdığı X-Real-IP) həmin hesab hələ də girə bilir
+	elsewhere := httptest.NewRequest("POST", "/api/auth/login", strings.NewReader(`{"email":"sam@m.test","password":"studentpass1"}`))
+	elsewhere.Host = host
+	elsewhere.RemoteAddr = "127.0.0.1:5000"
+	elsewhere.Header.Set("Content-Type", "application/json")
+	elsewhere.Header.Set("X-Real-IP", "198.51.100.7")
+	w = httptest.NewRecorder()
+	c.r.ServeHTTP(w, elsewhere)
+	if w.Code != 200 {
+		t.Fatalf("the owner from another address was locked out too: %d %s", w.Code, w.Body.String())
+	}
 	for i := 0; i < 5; i++ {
 		c.must(401, "POST", panel, "/api/super/login", "", map[string]string{"email": "two@test.local", "password": "x"})
 	}

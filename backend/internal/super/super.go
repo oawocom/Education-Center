@@ -133,10 +133,13 @@ func lockedFor(key string, maxFails int) time.Duration {
 func addFail(key string) {
 	failMu.Lock()
 	defer failMu.Unlock()
-	if len(fails) > 10000 {
-		fails = map[string][]time.Time{}
+	now := time.Now()
+	if len(fails) > 10000 { // yaddaş böyüməsin: yalnız vaxtı keçmişləri at (blokda olanlar qalır)
+		for k := range fails {
+			recentFails(k, now)
+		}
 	}
-	fails[key] = append(recentFails(key, time.Now()), time.Now())
+	fails[key] = append(recentFails(key, now), now)
 }
 
 func (h *handler) login(c *gin.Context) {

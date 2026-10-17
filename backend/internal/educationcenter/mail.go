@@ -1,6 +1,7 @@
 package educationcenter
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -9,7 +10,9 @@ import (
 	"html"
 	"log"
 	"mime"
+	"mime/quotedprintable"
 	"net"
+	netmail "net/mail"
 	"net/smtp"
 	"regexp"
 	"strings"
@@ -92,6 +95,15 @@ func (m Mail) name() string {
 	return "Təlim mərkəzi"
 }
 
+// qpEncode - quoted-printable: uzun sətirlər 76 simvolda bükülür (SMTP 998 həddini keçməsin).
+func qpEncode(s string) string {
+	var b bytes.Buffer
+	w := quotedprintable.NewWriter(&b)
+	w.Write([]byte(s))
+	w.Close()
+	return b.String()
+}
+
 func randomBoundary() string {
 	b := make([]byte, 12)
 	rand.Read(b)
@@ -111,18 +123,22 @@ func (m Mail) Send(to, subject, htmlBody, textBody string) error {
 	if port == "" {
 		port = "587"
 	}
+	from := strings.TrimSpace(m.From)
+	if strings.ContainsAny(from, "\r\n<>") {
+		return fmt.Errorf("göndərən ünvan düzgün deyil")
+	}
 	boundary := randomBoundary()
 	var msg strings.Builder
-	msg.WriteString("From: " + mime.QEncoding.Encode("utf-8", m.name()) + " <" + m.From + ">\r\n")
+	msg.WriteString("From: " + (&netmail.Address{Name: m.name(), Address: from}).String() + "\r\n")
 	msg.WriteString("To: " + to + "\r\n")
-	msg.WriteString("Subject: " + mime.QEncoding.Encode("utf-8", strings.ReplaceAll(subject, "\n", " ")) + "\r\n")
+	msg.WriteString("Subject: " + mime.QEncoding.Encode("utf-8", strings.Join(strings.Fields(subject), " ")) + "\r\n")
 	msg.WriteString("Date: " + time.Now().Format(time.RFC1123Z) + "\r\n")
 	msg.WriteString("MIME-Version: 1.0\r\n")
 	msg.WriteString("Content-Type: multipart/alternative; boundary=\"" + boundary + "\"\r\n\r\n")
-	msg.WriteString("--" + boundary + "\r\nContent-Type: text/plain; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	msg.WriteString(textBody + "\r\n")
-	msg.WriteString("--" + boundary + "\r\nContent-Type: text/html; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: 8bit\r\n\r\n")
-	msg.WriteString(htmlBody + "\r\n")
+	msg.WriteString("--" + boundary + "\r\nContent-Type: text/plain; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
+	msg.WriteString(qpEncode(textBody) + "\r\n")
+	msg.WriteString("--" + boundary + "\r\nContent-Type: text/html; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\n")
+	msg.WriteString(qpEncode(htmlBody) + "\r\n")
 	msg.WriteString("--" + boundary + "--\r\n")
 
 	host := strings.TrimSpace(m.Host)
@@ -134,6 +150,7 @@ func (m Mail) Send(to, subject, htmlBody, textBody string) error {
 		if derr != nil {
 			return derr
 		}
+		conn.SetDeadline(time.Now().Add(60 * time.Second))
 		c, err = smtp.NewClient(conn, host)
 	} else {
 		conn, derr := net.DialTimeout("tcp", addr, 15*time.Second)
@@ -157,7 +174,7 @@ func (m Mail) Send(to, subject, htmlBody, textBody string) error {
 			return err
 		}
 	}
-	if err := c.Mail(m.From); err != nil {
+	if err := c.Mail(from); err != nil {
 		return err
 	}
 	if err := c.Rcpt(to); err != nil {
@@ -240,30 +257,52 @@ type mailJob struct {
 	text     string
 }
 
+// İki növbə: hesab məktubları (dəvət, parol bərpası ...) bildirişlərdən (elan, qaimə) əvvəl gedir —
+// böyük bir elan göndərişi başqa mərkəzin parol linkini gecikdirməsin.
 var (
-	mailQueue = make(chan mailJob, 5000)
-	mailOnce  sync.Once
+	urgentQueue = make(chan mailJob, 2000)
+	bulkQueue   = make(chan mailJob, 5000)
+	mailOnce    sync.Once
 )
 
 const mailWorkers = 3
 
-func enqueueMail(j mailJob) bool {
+func deliver(j mailJob) {
+	if err := j.mail.Send(j.to, j.subject, j.html, j.text); err != nil {
+		logMailFailure(j.tenantID, j.to, err)
+		writeLog(j.db, j.to, j.userID, j.key, j.subject, "failed", err.Error())
+		return
+	}
+	writeLog(j.db, j.to, j.userID, j.key, j.subject, "sent", "")
+}
+
+func enqueueMail(j mailJob, urgent bool) bool {
 	mailOnce.Do(func() {
 		for i := 0; i < mailWorkers; i++ {
 			go func() {
-				for j := range mailQueue {
-					if err := j.mail.Send(j.to, j.subject, j.html, j.text); err != nil {
-						logMailFailure(j.tenantID, j.to, err)
-						writeLog(j.db, j.to, j.userID, j.key, j.subject, "failed", err.Error())
+				for {
+					select {
+					case j := <-urgentQueue:
+						deliver(j)
 						continue
+					default:
 					}
-					writeLog(j.db, j.to, j.userID, j.key, j.subject, "sent", "")
+					select {
+					case j := <-urgentQueue:
+						deliver(j)
+					case j := <-bulkQueue:
+						deliver(j)
+					}
 				}
 			}()
 		}
 	})
+	q := bulkQueue
+	if urgent {
+		q = urgentQueue
+	}
 	select {
-	case mailQueue <- j:
+	case q <- j:
 		return true
 	default:
 		return false

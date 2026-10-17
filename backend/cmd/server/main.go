@@ -3,8 +3,10 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"strings"
 
 	"educationcenter/internal/educationcenter"
 	"educationcenter/internal/security"
@@ -49,7 +51,11 @@ func newRouter(store *tenant.Store) *gin.Engine {
 	educationcenter.CentreURL = func(id uint) string { return centreURL(store, id) }
 
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	// Ziyarətçinin IP-si: nginx X-Real-IP-ni özü yazır (müştərinin göndərdiyini əvəz edir), frontend onu ötürür.
+	// X-Forwarded-For-a etibar edilmir — onu müştəri saxtalaşdıra bilər.
+	r.RemoteIPHeaders = []string{"X-Real-IP"}
+	r.SetTrustedProxies([]string{"127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "::1/128", "fc00::/7"})
+	r.Use(gin.LoggerWithFormatter(logLine), gin.Recovery())
 	r.MaxMultipartMemory = 32 << 20
 
 	r.GET("/api/health", func(c *gin.Context) { c.JSON(200, gin.H{"ok": true}) })
@@ -92,6 +98,16 @@ func centreURL(store *tenant.Store, id uint) string {
 		return ""
 	}
 	return envOr("PUBLIC_SCHEME", "https") + "://" + t.Domains[0].Host
+}
+
+// logLine - gin-in adi sətri, amma sorğu parametrləri olmadan (parol bərpası linkləri loga düşməsin).
+func logLine(p gin.LogFormatterParams) string {
+	path := p.Path
+	if i := strings.IndexByte(path, '?'); i >= 0 {
+		path = path[:i]
+	}
+	return fmt.Sprintf("[GIN] %v | %3d | %13v | %15s | %-7s %#v\n%s",
+		p.TimeStamp.Format("2006/01/02 - 15:04:05"), p.StatusCode, p.Latency, p.ClientIP, p.Method, path, p.ErrorMessage)
 }
 
 func envOr(k, def string) string {
