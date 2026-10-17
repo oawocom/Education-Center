@@ -13,7 +13,7 @@ import { T } from '../theme';
 
 const KIND_ICON: Record<string, any> = {
   message: MessageSquare, announcement: Megaphone, invoice: Receipt, invoice_overdue: Receipt,
-  registration: UserPlus, account_approved: UserPlus, attendance_alert: ClipboardCheck, exam_graded: FileText,
+  payment: Receipt, registration: UserPlus, account_approved: UserPlus, attendance_alert: ClipboardCheck, exam_graded: FileText,
 };
 
 export function ago(iso: string): string {

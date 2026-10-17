@@ -63,6 +63,7 @@ export const NAV: Record<Role, NavItem[]> = {
     { key: 'tuition-plans', label: 'Tariflər', emoji: '🏷️', resource: 'tuition-plans', view: 'crud:tuition-plans', group: 'Maliyyə' },
     { key: 'student-tuitions', label: 'Şagird tarifləri', emoji: '🧾', resource: 'student-tuitions', view: 'crud:student-tuitions', group: 'Maliyyə' },
     { key: 'invoices', label: 'Ödənişlər', emoji: '💳', resource: 'invoices', view: 'crud:invoices', group: 'Maliyyə' },
+    { key: 'payments', label: 'Ödəniş tarixçəsi', emoji: '🧾', resource: 'invoices', view: 'crud:payments', group: 'Maliyyə' },
 
     // --- Mərkəzin quruluşu ---
     { key: 'branches', label: 'Filiallar', emoji: '🏢', resource: 'branches', view: 'crud:branches', group: 'Quruluş' },

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Search, Pencil, Trash2, Archive, ArchiveRestore, ChevronLeft, ChevronRight,
-  Link2, Heart, Users, BookOpen, CheckCircle2, Wand2, Download,
+  Link2, Heart, Users, BookOpen, CheckCircle2, Wand2, Download, FileUp,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, can, getUser, ListParams } from '../utils/api';
@@ -11,6 +11,7 @@ import { ResourceDef, ColumnDef, SelectOption, RowActionDef, ToolbarActionDef } 
 import { ScreenMeta } from '../screens';
 import { Modal, Button, EmptyState, ErrorState, Badge, Field } from './ui';
 import LinkManager from './LinkManager';
+import ImportModal, { IMPORTABLE } from './ImportModal';
 import LinksScreen from './LinksScreen';
 import GroupsScreen from './GroupsScreen';
 import QuestionAnswerEditor from './QuestionAnswerEditor';
@@ -521,6 +522,7 @@ function GenericCrudPage({ def, meta, color = '#2F5BEA', fixedFilters }: Props) 
 
   // --- CSV ixracı: cari axtarış və filtrlərlə bütün sətirlər (Excel-də açılır) ---
   const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
   const cellText = (row: Row, col: ColumnDef): string => {
     const v = row[col.key];
     if (v === null || v === undefined || v === '') return '';
@@ -583,8 +585,10 @@ function GenericCrudPage({ def, meta, color = '#2F5BEA', fixedFilters }: Props) 
   const showActions = canUpdate || canDelete || hasRowActions;
   const pages = Math.max(1, Math.ceil(total / perPage));
 
+  const canImport = canCreate && IMPORTABLE.indexOf(def.key) !== -1;
   const hasToolbar =
     total > 0 ||
+    canImport ||
     def.searchable ||
     (def.filters && def.filters.length > 0) ||
     def.archivable ||
@@ -643,6 +647,12 @@ function GenericCrudPage({ def, meta, color = '#2F5BEA', fixedFilters }: Props) 
           )}
 
           <div className="ml-auto flex flex-wrap gap-2 items-center">
+            {canImport && (
+              <Button variant="ghost" onClick={() => setImporting(true)}>
+                <FileUp className="w-4 h-4" />
+                İdxal (CSV)
+              </Button>
+            )}
             {total > 0 && (
               <Button variant="ghost" onClick={exportCsv} disabled={exporting}>
                 <Download className="w-4 h-4" />
@@ -663,6 +673,10 @@ function GenericCrudPage({ def, meta, color = '#2F5BEA', fixedFilters }: Props) 
             )}
           </div>
         </div>
+      )}
+
+      {importing && (
+        <ImportModal def={def} relOptions={relOptions} color={color} onClose={() => setImporting(false)} onDone={load} />
       )}
 
       {/* Cədvəl */}

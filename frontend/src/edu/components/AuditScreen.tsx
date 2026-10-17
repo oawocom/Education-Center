@@ -32,6 +32,7 @@ export const ACTION_LABEL: Record<string, { label: string; tone?: 'bad' | 'warn'
   delete: { label: 'Silindi', tone: 'bad' },
   archive: { label: 'Arxivə göndərildi' },
   restore: { label: 'Arxivdən qaytarıldı' },
+  payment: { label: 'Ödəniş qəbul edildi', tone: 'ok' },
 };
 
 const TONE: Record<string, { color: string; soft: string }> = {

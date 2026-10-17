@@ -33,7 +33,7 @@ const ICONS: Record<string, any> = {
   subjects: BookMarked, levels: TrendingUp, reports: BarChart3, announcements: Megaphone, messages: MessageSquare,
   users: KeyRound, 'sub-roles': Shield, settings: Settings, achievements: Award, results: TrendingUp,
   questions: HelpCircle, availability: Clock, 'teacher-availability': Clock,
-  email: MailOpen, audit: ScrollText,
+  email: MailOpen, audit: ScrollText, payments: Receipt,
 };
 
 const HUB_ICONS: Record<string, any> = {

@@ -713,7 +713,7 @@ func Models() []interface{} {
 		// 6. Kommunikasiya
 		&Message{}, &Announcement{}, &Notification{},
 		// 7. Maliyye
-		&TuitionPlan{}, &StudentTuition{}, &Invoice{},
+		&TuitionPlan{}, &StudentTuition{}, &Invoice{}, &Payment{},
 		// 8. Motivasiya
 		&XPEvent{}, &Achievement{}, &StudentAchievement{},
 		// 9. Tenzimlemeler

@@ -71,6 +71,13 @@ const PUBLISH_COLORS: Record<string, string> = {
   draft: '#9AA3B2', published: '#16A34A', closed: '#5B6577',
 };
 
+const PAY_METHODS = [
+  { value: 'cash', label: 'Nağd' },
+  { value: 'card', label: 'Kart' },
+  { value: 'transfer', label: 'Köçürmə' },
+  { value: 'online', label: 'Onlayn' },
+];
+
 const INVOICE_STATUS: SelectOption[] = [
   { value: 'pending', label: 'Gözləyir' },
   { value: 'paid', label: 'Ödənilib' },
@@ -1373,6 +1380,28 @@ export const RESOURCES: Record<string, ResourceDef> = {
         successText: 'Statuslar yeniləndi',
       },
     ],
+    rowActions: [
+      {
+        key: 'pay',
+        label: 'Ödəniş qəbul et',
+        icon: 'check',
+        kind: 'endpoint',
+        perm: { resource: 'invoices', action: 'update' },
+        endpoint: {
+          path: '/ops/record-payment',
+          idKey: 'invoice_id',
+          confirmText:
+            'Ödəniş tarixçəyə yazılır, qaimənin ödənilən məbləği və statusu avtomatik yenilənir, şagird və valideynə bildiriş gedir. Məbləği boş qoysanız, qalığın hamısı ödənilmiş sayılır.',
+          successText: 'Ödəniş qəbul edildi',
+          fields: [
+            { key: 'amount', label: 'Məbləğ (boş: qalığın hamısı)', type: 'number', width: 'half', step: 0.01 },
+            { key: 'method', label: 'Üsul', type: 'select', width: 'half', options: PAY_METHODS },
+            { key: 'paid_at', label: 'Tarix (boş: bu gün)', type: 'date', width: 'half' },
+            { key: 'reference', label: 'Qəbz / əməliyyat №', type: 'text', width: 'half' },
+          ],
+        },
+      },
+    ],
     filters: [
       { key: 'student_id', label: 'Şagird', type: 'relation', resource: 'students' },
       { key: 'branch_id', label: 'Filial', type: 'relation', resource: 'branches' },
@@ -1409,6 +1438,27 @@ export const RESOURCES: Record<string, ResourceDef> = {
       { key: 'reference', label: 'İstinad', type: 'text', width: 'half' },
       { key: 'note', label: 'Qeyd', type: 'textarea' },
     ],
+  },
+
+  payments: {
+    key: 'payments',
+    title: 'Ödəniş tarixçəsi',
+    titleSingular: 'Ödəniş',
+    description: 'Qəbul edilmiş hər ödəniş: nə vaxt, nə qədər, necə. Ödəniş qaimənin yanındakı "Ödəniş qəbul et" düyməsi ilə yazılır.',
+    readOnly: true,
+    filters: [
+      { key: 'student_id', label: 'Şagird', type: 'relation', resource: 'students' },
+      { key: 'method', label: 'Üsul', type: 'select', options: PAY_METHODS },
+    ],
+    columns: [
+      { key: 'paid_at', label: 'Tarix', type: 'date' },
+      { key: 'student_id', label: 'Şagird', type: 'relation', resource: 'students' },
+      { key: 'invoice_id', label: 'Qaimə', type: 'relation', resource: 'invoices', labelKey: 'number' },
+      { key: 'amount', label: 'Məbləğ', type: 'money', align: 'right' },
+      { key: 'method', label: 'Üsul', type: 'badge', map: { cash: 'Nağd', card: 'Kart', transfer: 'Köçürmə', online: 'Onlayn' } },
+      { key: 'reference', label: 'Qəbz №' },
+    ],
+    fields: [],
   },
 
   // ==================== 8. MOTİVASİYA ====================

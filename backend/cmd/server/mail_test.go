@@ -340,6 +340,23 @@ func TestMailAuthNotifications(t *testing.T) {
 	c.must(400, "DELETE", panel, fmt.Sprintf("/api/super/admins/%d", int(rootID)), st, nil)
 	c.must(200, "DELETE", panel, fmt.Sprintf("/api/super/admins/%d", int(extra["id"].(float64))), st, nil)
 
+	// --- ödəniş: hissə-hissə, artıq ödəniş olmur, tarixçə qalır ---
+	stu := c.must(201, "POST", host, "/api/sf/students", boss, map[string]interface{}{"name": "Pay Student"})
+	bill := c.must(201, "POST", host, "/api/sf/invoices", boss, map[string]interface{}{"student_id": stu["id"], "amount": 100})
+	invID := bill["id"]
+	c.must(400, "POST", host, "/api/sf/ops/record-payment", boss, map[string]interface{}{"invoice_id": invID, "amount": 150})
+	if out := c.must(200, "POST", host, "/api/sf/ops/record-payment", boss, map[string]interface{}{"invoice_id": invID, "amount": 40, "method": "card"}); out["status"] != "partial" {
+		t.Fatalf("partial payment: %v", out)
+	}
+	if out := c.must(200, "POST", host, "/api/sf/ops/record-payment", boss, map[string]interface{}{"invoice_id": invID, "paid_at": "2026-10-01T00:00:00Z"}); out["status"] != "paid" || out["paid_amount"] != float64(100) {
+		t.Fatalf("rest of the payment: %v", out)
+	}
+	c.must(400, "POST", host, "/api/sf/ops/record-payment", boss, map[string]interface{}{"invoice_id": invID, "amount": 1})
+	if n := c.must(200, "GET", host, fmt.Sprintf("/api/sf/payments?invoice_id=%v", invID), boss, nil)["total"]; n != float64(2) {
+		t.Fatalf("payments: %v", n)
+	}
+	c.must(404, "POST", host, "/api/sf/payments", boss, map[string]interface{}{"invoice_id": invID, "amount": 5})
+
 	// --- çox səhv giriş: blok ---
 	for i := 0; i < 5; i++ {
 		c.must(401, "POST", host, "/api/auth/login", "", map[string]string{"email": "sam@m.test", "password": "wrong-pass"})

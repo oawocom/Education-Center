@@ -693,6 +693,7 @@ const AUDIT_AZ: Record<string, string> = {
   password_set_by_admin: 'Admin parol verdi', password_reset_sent: 'Bərpa linki göndərildi', logout_all: 'Bütün cihazlardan çıxış',
   user_created: 'Hesab yaradıldı', user_updated: 'Hesab dəyişdirildi', user_deleted: 'Hesab silindi',
   create: 'Yaradıldı', update: 'Dəyişdirildi', delete: 'Silindi', archive: 'Arxivə', restore: 'Arxivdən qaytarıldı',
+  payment: 'Ödəniş qəbul edildi',
 };
 
 function CentreLog({ t, onClose }: { t: Tenant; onClose: () => void }) {

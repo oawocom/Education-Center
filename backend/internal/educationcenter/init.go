@@ -108,6 +108,7 @@ func RegisterRoutes(api *gin.RouterGroup, getDB func(uint) (*gorm.DB, error)) {
 				ops.POST("/generate-lessons", RequirePerm("lessons", ActionCreate), h.GenerateLessons)
 				ops.POST("/generate-invoices", RequirePerm("invoices", ActionCreate), h.GenerateInvoices)
 				ops.POST("/mark-overdue", RequirePerm("invoices", ActionUpdate), h.MarkOverdueInvoices)
+				ops.POST("/record-payment", RequirePerm("invoices", ActionUpdate), h.RecordPayment)
 				ops.POST("/place-applicant", RequirePerm("students", ActionCreate), h.PlaceApplicant)
 				ops.POST("/grade-submission", RequirePerm("exam-submissions", ActionUpdate), h.GradeSubmission)
 				ops.POST("/grade-pending", RequirePerm("exam-submissions", ActionUpdate), h.GradePending)

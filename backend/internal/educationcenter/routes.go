@@ -327,6 +327,18 @@ func RegisterResources(sf *gin.RouterGroup, h *Handler) {
 		AfterUpdate:  afterUpdateInvoice,
 	})
 
+	// Ödəniş tarixçəsi — yalnız oxunur; yazmaq /ops/record-payment ilə
+	RegisterCRUD(sf, h, Resource[Payment]{
+		Name:         "payments",
+		Perm:         "invoices",
+		Filters:      []string{"invoice_id", "student_id", "method"},
+		Sortable:     []string{"paid_at", "amount", "created_at"},
+		DefaultOrder: "paid_at DESC",
+		Scope:        scopeInvoices,
+		DateField:    "paid_at",
+		ReadOnly:     true,
+	})
+
 	// ---------- 8. MOTIVASIYA ----------
 
 	RegisterCRUD(sf, h, Resource[XPEvent]{
