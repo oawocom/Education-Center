@@ -193,6 +193,16 @@ const ADMIN: Record<string, ScreenMeta> = {
     note: note('admin', 'Rol əsaslı giriş nəzarəti hər istifadəçinin yalnız öz işi üçün lazım olan məlumata çıxışını təmin edir.'),
   },
 
+  email: {
+    h1: 'E-poçt',
+    sub: 'Mərkəzin göndərdiyi məktubların şablonları və göndəriş jurnalı.',
+  },
+
+  audit: {
+    h1: 'Audit jurnalı',
+    sub: 'Kim, nə vaxt, nəyi etdi: girişlər, hesab dəyişiklikləri və bütün yazılar.',
+  },
+
   settings: {
     h1: 'Tənzimləmələr',
     sub: 'Sistem parametrləri və mərkəzin əməliyyat siyasətləri.',

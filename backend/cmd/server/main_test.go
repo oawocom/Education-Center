@@ -183,6 +183,17 @@ func TestCentres(t *testing.T) {
 	if err := educationcenter.Prepare(db, a); err != nil {
 		t.Fatal(err)
 	}
+	// an older database had published announcements and no notified_at: they count as sent
+	db.Exec(`INSERT INTO edu_announcements (title, status, created_at, updated_at) VALUES ('Old news', 'published', now(), now())`)
+	db.Exec(`ALTER TABLE edu_announcements DROP COLUMN notified_at`)
+	if err := educationcenter.Prepare(db, a); err != nil {
+		t.Fatal(err)
+	}
+	var unsent int64
+	db.Raw(`SELECT count(*) FROM edu_announcements WHERE notified_at IS NULL`).Scan(&unsent)
+	if unsent != 0 {
+		t.Fatalf("old announcements not marked as sent: %d", unsent)
+	}
 	var ids []uint
 	db.Raw(`SELECT DISTINCT tenant_id FROM edu_users`).Scan(&ids)
 	if len(ids) != 1 || ids[0] != a {

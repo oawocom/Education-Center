@@ -18,6 +18,7 @@ export const HUBS: Record<Role, HubDef[]> = {
     { id: 'groups', label: 'Qruplar', keys: ['groups'] },
     { id: 'people', label: 'İnsanlar', keys: ['students', 'teachers', 'guardians', 'links'] },
     { id: 'subjects', label: 'Fənlər', keys: ['subjects'] },
+    { id: 'system', label: 'Sistem', keys: ['users', 'sub-roles', 'email', 'audit', 'settings'] },
   ],
   teacher: [
     { id: 'home', label: 'Ana səhifə', keys: ['dashboard'] },

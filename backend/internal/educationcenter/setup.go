@@ -26,8 +26,14 @@ func Prepare(db *gorm.DB, tenantID uint) error {
 			return err
 		}
 	}
+	// Bildiriş sütunu ilk dəfə əlavə olunanda köhnə elanlar "göndərilmiş" sayılır:
+	// köhnə elanı redaktə etmək hamıya təzədən bildiriş göndərməsin.
+	oldAnnouncements := m.HasTable(&Announcement{}) && !m.HasColumn(&Announcement{}, "notified_at")
 	if err := db.AutoMigrate(Models()...); err != nil {
 		return err
+	}
+	if oldAnnouncements {
+		db.Exec(`UPDATE edu_announcements SET notified_at = COALESCE(published_at, created_at) WHERE notified_at IS NULL AND status = 'published'`)
 	}
 	return db.Unscoped().Model(&EduUser{}).Where("tenant_id <> ?", tenantID).UpdateColumn("tenant_id", tenantID).Error
 }

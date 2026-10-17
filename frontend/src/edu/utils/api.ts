@@ -32,6 +32,9 @@ export interface EduUser {
   student_id?: number;
   guardian_id?: number;
   branch_id?: number;
+  phone?: string;
+  email_notifications?: boolean;
+  provider?: string;
   permissions: Record<string, string[]>;
 }
 
@@ -263,7 +266,7 @@ export const auth = {
     return api.raw('/auth/me');
   },
 
-  changePassword(current: string, next: string): Promise<any> {
+  changePassword(current: string, next: string): Promise<{ success: boolean; token: string }> {
     return api.raw('/auth/change-password', {
       method: 'POST',
       body: JSON.stringify({ current_password: current, new_password: next }),
@@ -312,6 +315,36 @@ export const auth = {
     }).then(handle);
   },
 
+  // ---- Parolun bərpası (girişsiz) ----
+  forgotPassword(email: string): Promise<{ success: boolean; mail_ready: boolean }> {
+    return fetch(API_BASE + '/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    }).then(handle);
+  },
+
+  verifyReset(token: string): Promise<{ valid: boolean; name: string; email: string }> {
+    return fetch(API_BASE + '/auth/reset-password?token=' + encodeURIComponent(token)).then(handle);
+  },
+
+  resetPassword(token: string, password: string): Promise<{ success: boolean; email: string }> {
+    return fetch(API_BASE + '/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token, password }),
+    }).then(handle);
+  },
+
+  // ---- Profil ----
+  updateProfile(patch: { name?: string; display_name?: string; phone?: string; email_notifications?: boolean }): Promise<EduUser> {
+    return api.raw('/auth/profile', { method: 'PUT', body: JSON.stringify(patch) });
+  },
+
+  logoutAll(): Promise<{ success: boolean; token: string }> {
+    return api.raw('/auth/logout-all', { method: 'POST' });
+  },
+
   chooseRole(role: string): Promise<{ token: string; user: EduUser }> {
     return api.raw('/auth/choose-role', { method: 'POST', body: JSON.stringify({ role }) });
   },
@@ -345,3 +378,80 @@ export async function uploadMedia(file: File): Promise<MediaItem> {
   fd.append('file', file);
   return api.raw('/media', { method: 'POST', body: fd });
 }
+
+// ---------- Bildirişlər (zəng) ----------
+export interface Notice {
+  id: number;
+  type: string;
+  title: string;
+  body: string;
+  link: string;
+  is_read: boolean;
+  priority: string;
+  created_at: string;
+}
+
+export const inbox = {
+  list(limit: number = 15): Promise<{ data: Notice[]; unread: number }> {
+    return api.raw('/inbox?limit=' + limit);
+  },
+  read(ids: number[] | 'all'): Promise<any> {
+    return api.raw('/inbox/read', { method: 'POST', body: JSON.stringify(ids === 'all' ? { all: true } : { ids }) });
+  },
+};
+
+// ---------- E-poçt (admin) ----------
+export interface MailTemplate {
+  key: string;
+  label: string;
+  description: string;
+  vars: string[];
+  default_subject: string;
+  default_body: string;
+  subject: string;
+  body: string;
+  enabled: boolean;
+  customized: boolean;
+}
+
+export interface MailLogRow {
+  id: number;
+  created_at: string;
+  to: string;
+  template: string;
+  subject: string;
+  status: 'sent' | 'failed' | 'skipped';
+  error: string;
+}
+
+export interface AuditRow {
+  id: number;
+  created_at: string;
+  user_email: string;
+  action: string;
+  resource: string;
+  ref_id?: number;
+  ip: string;
+  detail: string;
+}
+
+export const mail = {
+  templates(): Promise<{ data: MailTemplate[]; mail_ready: boolean; from: string; from_name: string }> {
+    return api.raw('/email/templates');
+  },
+  save(key: string, t: { subject: string; body: string; enabled: boolean }): Promise<any> {
+    return api.raw('/email/templates/' + key, { method: 'PUT', body: JSON.stringify(t) });
+  },
+  reset(key: string): Promise<any> {
+    return api.raw('/email/templates/' + key, { method: 'DELETE' });
+  },
+  test(key: string, draft?: { subject: string; body: string }): Promise<{ success: boolean; to: string }> {
+    return api.raw('/email/templates/' + key + '/test', { method: 'POST', body: JSON.stringify(draft || {}) });
+  },
+  log(params?: { status?: string; q?: string }): Promise<{ data: MailLogRow[] }> {
+    return api.raw('/email/log' + qs(params as any));
+  },
+  audit(params?: { action?: string; resource?: string; q?: string }): Promise<{ data: AuditRow[] }> {
+    return api.raw('/audit' + qs(params as any));
+  },
+};

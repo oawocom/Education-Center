@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Building2, KeyRound, Loader2, LogOut, Pencil, Plus, ShieldCheck, UserPlus, X } from 'lucide-react';
+import {
+  Building2, KeyRound, Loader2, LogOut, Pencil, Plus, ShieldCheck, UserPlus, X, Mail, Users, ScrollText, Search, Send, Trash2,
+} from 'lucide-react';
 
 // ============================================================
 // Super admin paneli: mərkəzləri yaratmaq və idarə etmək.
@@ -20,7 +22,33 @@ interface Tenant {
   domains: { host: string }[];
   counts?: Record<string, number>;
   error?: string;
+  smtp_host?: string;
+  smtp_port?: string;
+  smtp_user?: string;
+  smtp_from?: string;
+  smtp_from_name?: string;
+  smtp_password_set?: boolean;
+  mail_source?: 'own' | 'server' | 'none';
 }
+
+interface CentreUser {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+  is_active: boolean;
+  last_login?: string;
+  created_at: string;
+}
+
+const ROLE_AZ: Record<string, string> = { admin: 'Admin', teacher: 'Müəllim', student: 'Şagird', guardian: 'Valideyn', '': 'Rol seçilməyib' };
+
+const MAIL_BADGE: Record<string, { label: string; cls: string }> = {
+  own: { label: 'E-poçt: öz SMTP', cls: 'bg-[#DCFCE7] text-[#166534]' },
+  server: { label: 'E-poçt: serverin SMTP-si', cls: 'bg-[#E0E7FF] text-[#3730A3]' },
+  none: { label: 'E-poçt qurulmayıb', cls: 'bg-[#FEF3C7] text-[#92400E]' },
+};
 
 function token(): string {
   try {
@@ -56,10 +84,10 @@ const ghost =
 
 const hosts = (text: string) => text.split(/[\s,]+/).map((h) => h.trim()).filter(Boolean);
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function Modal({ title, onClose, children, wide }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(15,23,42,.4)] p-4" onClick={onClose}>
-      <div className="w-full max-w-md bg-white rounded-2xl p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className={'w-full bg-white rounded-2xl p-6 shadow-xl max-h-[90vh] overflow-y-auto ' + (wide ? 'max-w-4xl' : 'max-w-md')} onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-base font-bold text-[#0F172A]">{title}</h2>
           <button onClick={onClose} className="text-[#94A3B8] hover:text-[#0F172A]">
@@ -125,10 +153,15 @@ type Dialog =
   | { kind: 'edit'; t: Tenant }
   | { kind: 'password'; t: Tenant }
   | { kind: 'admin'; t: Tenant }
+  | { kind: 'mail'; t: Tenant }
+  | { kind: 'users'; t: Tenant }
+  | { kind: 'log'; t: Tenant }
   | { kind: 'own' }
   | null;
 
 function Panel({ onOut }: { onOut: () => void }) {
+  const [tab, setTab] = useState<'centres' | 'admins'>('centres');
+  const [me, setMe] = useState<{ id: number; email: string } | null>(null);
   const [list, setList] = useState<Tenant[] | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [busy, setBusy] = useState(false);
@@ -141,11 +174,54 @@ function Panel({ onOut }: { onOut: () => void }) {
       .catch((e) => toast.error(e.message));
   }, []);
   useEffect(load, [load]);
+  useEffect(() => {
+    call('/me').then(setMe).catch(() => {});
+  }, []);
 
   const open = (d: Dialog) => {
     setDialog(d);
     if (d && d.kind === 'edit') setF({ name: d.t.name, domains: d.t.domains.map((x) => x.host).join('\n'), is_active: d.t.is_active });
+    else if (d && d.kind === 'mail')
+      setF({ host: d.t.smtp_host || '', port: d.t.smtp_port || '587', user: d.t.smtp_user || '', password: '', from: d.t.smtp_from || '', from_name: d.t.smtp_from_name || '', to: me?.email || '' });
     else setF({});
+  };
+
+  const totals = (list || []).reduce(
+    (a, t) => {
+      a.centres++;
+      if (t.is_active) a.active++;
+      a.users += t.counts?.users || 0;
+      a.teachers += t.counts?.teachers || 0;
+      a.students += t.counts?.students || 0;
+      if (t.mail_source === 'none') a.noMail++;
+      return a;
+    },
+    { centres: 0, active: 0, users: 0, teachers: 0, students: 0, noMail: 0 },
+  );
+
+  const saveMail = (clear?: boolean) => {
+    if (!dialog || dialog.kind !== 'mail') return;
+    const t = dialog.t;
+    const mail = clear
+      ? { host: '', port: '', user: '', password: '', from: '', from_name: '' }
+      : { host: f.host, port: f.port, user: f.user, password: f.password, from: f.from, from_name: f.from_name };
+    run(
+      () => call('/tenants/' + t.id, 'PUT', { name: t.name, is_active: t.is_active, domains: t.domains.map((d) => d.host), mail }),
+      clear ? 'Mərkəzin SMTP-si silindi' : 'E-poçt ayarları saxlanıldı',
+    );
+  };
+
+  const testMail = async () => {
+    if (!dialog || dialog.kind !== 'mail') return;
+    setBusy(true);
+    try {
+      const r = await call('/tenants/' + dialog.t.id + '/test-mail', 'POST', { to: f.to });
+      toast.success('Sınaq məktubu göndərildi', { description: r.to });
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const run = async (fn: () => Promise<any>, done: string) => {
@@ -178,6 +254,7 @@ function Panel({ onOut }: { onOut: () => void }) {
       run(() => call('/tenants/' + dialog.t.id + '/admin', 'POST', { name: f.admin_name, email: f.admin_email, password: f.admin_password }), 'Admin yaradıldı');
     if (dialog.kind === 'own')
       run(() => call('/password', 'POST', { current_password: f.current, new_password: f.next }), 'Parolunuz dəyişdirildi');
+    if (dialog.kind === 'mail') saveMail();
   };
 
   const adminFields = (
@@ -188,8 +265,8 @@ function Panel({ onOut }: { onOut: () => void }) {
       <Field label="Adminin e-poçtu">
         <input className={input} type="email" required value={f.admin_email || ''} onChange={set('admin_email')} />
       </Field>
-      <Field label="Adminin parolu (min. 6 simvol)">
-        <input className={input} type="password" minLength={6} required value={f.admin_password || ''} onChange={set('admin_password')} autoComplete="new-password" />
+      <Field label="Adminin parolu (ən azı 8 simvol)">
+        <input className={input} type="password" minLength={8} required value={f.admin_password || ''} onChange={set('admin_password')} autoComplete="new-password" />
       </Field>
     </>
   );
@@ -207,6 +284,22 @@ function Panel({ onOut }: { onOut: () => void }) {
           <div className="flex items-center gap-2 font-bold text-[#0F172A]">
             <ShieldCheck className="w-5 h-5 text-[#4F46E5]" /> Super admin
           </div>
+          <nav className="flex items-center gap-1">
+            {(
+              [
+                ['centres', 'Mərkəzlər'],
+                ['admins', 'Super adminlər'],
+              ] as const
+            ).map(([k, l]) => (
+              <button
+                key={k}
+                onClick={() => setTab(k)}
+                className={'px-3 py-1.5 rounded-lg text-sm ' + (tab === k ? 'bg-[#EEF2FF] text-[#4F46E5] font-semibold' : 'text-[#475569]')}
+              >
+                {l}
+              </button>
+            ))}
+          </nav>
           <div className="flex items-center gap-2">
             <button className={ghost} onClick={() => open({ kind: 'own' })}>
               <KeyRound className="w-3.5 h-3.5" /> Parolum
@@ -218,7 +311,26 @@ function Panel({ onOut }: { onOut: () => void }) {
         </div>
       </header>
 
+      {tab === 'admins' && <SuperAdmins me={me} />}
+
+      {tab === 'centres' && (
       <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
+        {list && list.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 mb-6">
+            {[
+              ['Mərkəz', totals.centres, totals.active + ' aktiv'],
+              ['Hesab', totals.users, ''],
+              ['Müəllim', totals.teachers, ''],
+              ['Şagird', totals.students, ''],
+              ['E-poçtsuz', totals.noMail, 'SMTP qurulmayıb'],
+            ].map(([l, n, sub]) => (
+              <div key={String(l)} className="bg-white rounded-2xl border border-[#E2E8F0] px-4 py-3">
+                <div className="text-2xl font-extrabold text-[#0F172A]">{n}</div>
+                <div className="text-xs text-[#64748B]">{l}{sub ? ' · ' + sub : ''}</div>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex items-center justify-between mb-6 gap-3">
           <div>
             <h1 className="text-2xl font-extrabold text-[#0F172A]">Mərkəzlər</h1>
@@ -255,13 +367,31 @@ function Panel({ onOut }: { onOut: () => void }) {
                         </a>
                       ))}
                     </div>
-                    <p className="text-xs text-[#94A3B8] mt-1">Baza: {t.db_name}</p>
+                    <p className="text-xs text-[#94A3B8] mt-1 flex items-center gap-2 flex-wrap">
+                      Baza: {t.db_name}
+                      {t.mail_source && (
+                        <span className={'text-[11px] font-semibold px-2 py-0.5 rounded-full ' + MAIL_BADGE[t.mail_source].cls}>{MAIL_BADGE[t.mail_source].label}</span>
+                      )}
+                    </p>
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <button className={ghost} onClick={() => open({ kind: 'edit', t })}>
                     <Pencil className="w-3.5 h-3.5" /> Dəyiş
                   </button>
+                  <button className={ghost} onClick={() => open({ kind: 'mail', t })}>
+                    <Mail className="w-3.5 h-3.5" /> E-poçt
+                  </button>
+                  {t.counts && (
+                    <button className={ghost} onClick={() => open({ kind: 'users', t })}>
+                      <Users className="w-3.5 h-3.5" /> İstifadəçilər
+                    </button>
+                  )}
+                  {t.counts && (
+                    <button className={ghost} onClick={() => open({ kind: 'log', t })}>
+                      <ScrollText className="w-3.5 h-3.5" /> Jurnal
+                    </button>
+                  )}
                   <button className={ghost} onClick={() => open({ kind: 'password', t })}>
                     <KeyRound className="w-3.5 h-3.5" /> Parol
                   </button>
@@ -294,8 +424,12 @@ function Panel({ onOut }: { onOut: () => void }) {
           ))}
         </div>
       </main>
+      )}
 
-      {dialog && (
+      {dialog && dialog.kind === 'users' && <CentreUsers t={dialog.t} onClose={() => setDialog(null)} />}
+      {dialog && dialog.kind === 'log' && <CentreLog t={dialog.t} onClose={() => setDialog(null)} />}
+
+      {dialog && dialog.kind !== 'users' && dialog.kind !== 'log' && (
         <Modal
           title={
             dialog.kind === 'create'
@@ -306,7 +440,9 @@ function Panel({ onOut }: { onOut: () => void }) {
                   ? 'İstifadəçiyə yeni parol — ' + dialog.t.name
                   : dialog.kind === 'admin'
                     ? 'Admin əlavə et — ' + dialog.t.name
-                    : 'Parolumu dəyiş'
+                    : dialog.kind === 'mail'
+                      ? 'E-poçt (SMTP) — ' + dialog.t.name
+                      : 'Parolumu dəyiş'
           }
           onClose={() => setDialog(null)}
         >
@@ -337,9 +473,56 @@ function Panel({ onOut }: { onOut: () => void }) {
                 <Field label="İstifadəçinin e-poçtu">
                   <input className={input} type="email" required value={f.email || ''} onChange={set('email')} />
                 </Field>
-                <Field label="Yeni parol (min. 6 simvol)">
-                  <input className={input} type="password" minLength={6} required value={f.password || ''} onChange={set('password')} autoComplete="new-password" />
+                <Field label="Yeni parol (ən azı 8 simvol)">
+                  <input className={input} type="password" minLength={8} required value={f.password || ''} onChange={set('password')} autoComplete="new-password" />
                 </Field>
+                <p className="text-xs text-[#64748B]">İstifadəçinin bütün sessiyaları bağlanır. Daha yaxşısı: &quot;İstifadəçilər&quot; bölməsindən bərpa linki göndərin.</p>
+              </>
+            )}
+            {dialog.kind === 'mail' && (
+              <>
+                <p className="text-xs text-[#64748B]">
+                  Mərkəzin məktubları (dəvət, parol bərpası, bildirişlər) bu ayarla gedir. Boş qalsa, serverin ümumi SMTP-si işləyir (varsa).
+                  Gmail üçün: smtp.gmail.com, port 587, istifadəçi — Gmail ünvanı, parol — &quot;App password&quot;.
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-2">
+                    <Field label="SMTP server">
+                      <input className={input} value={f.host || ''} onChange={set('host')} placeholder="smtp.gmail.com" />
+                    </Field>
+                  </div>
+                  <Field label="Port">
+                    <input className={input} value={f.port || ''} onChange={set('port')} placeholder="587" />
+                  </Field>
+                </div>
+                <Field label="İstifadəçi">
+                  <input className={input} value={f.user || ''} onChange={set('user')} autoComplete="off" />
+                </Field>
+                <Field label={dialog.t.smtp_password_set ? 'Parol (saxlanılıb — dəyişmək üçün yazın)' : 'Parol'}>
+                  <input className={input} type="password" value={f.password || ''} onChange={set('password')} autoComplete="new-password" placeholder={dialog.t.smtp_password_set ? '••••••••' : ''} />
+                </Field>
+                <div className="grid grid-cols-2 gap-2">
+                  <Field label="Göndərən ünvan (From)">
+                    <input className={input} type="email" value={f.from || ''} onChange={set('from')} placeholder="noreply@merkez.az" />
+                  </Field>
+                  <Field label="Göndərənin adı">
+                    <input className={input} value={f.from_name || ''} onChange={set('from_name')} placeholder={dialog.t.name} />
+                  </Field>
+                </div>
+                <div className="rounded-xl border border-[#E2E8F0] p-3 space-y-2">
+                  <p className="text-xs font-semibold text-[#475569]">Sınaq məktubu (saxlanmış ayarla gedir)</p>
+                  <div className="flex gap-2">
+                    <input className={input} type="email" value={f.to || ''} onChange={set('to')} placeholder="kimə" />
+                    <button type="button" disabled={busy} onClick={testMail} className={ghost + ' shrink-0'}>
+                      <Send className="w-3.5 h-3.5" /> Göndər
+                    </button>
+                  </div>
+                </div>
+                {dialog.t.smtp_host && (
+                  <button type="button" disabled={busy} onClick={() => saveMail(true)} className="text-xs text-[#B91C1C] hover:underline">
+                    Mərkəzin SMTP-sini sil (serverin ümumisinə qayıt)
+                  </button>
+                )}
               </>
             )}
             {dialog.kind === 'admin' && adminFields}
@@ -377,5 +560,337 @@ export default function SuperPage() {
         setSignedIn(false);
       }}
     />
+  );
+}
+
+// ============================================================
+// Mərkəzin istifadəçiləri: axtarış, aktiv/deaktiv, bərpa linki
+// ============================================================
+function CentreUsers({ t, onClose }: { t: Tenant; onClose: () => void }) {
+  const [rows, setRows] = useState<CentreUser[] | null>(null);
+  const [q, setQ] = useState('');
+  const [role, setRole] = useState('');
+  const [busy, setBusy] = useState(0);
+
+  const load = useCallback(() => {
+    const p = new URLSearchParams();
+    if (q.trim()) p.set('q', q.trim());
+    if (role) p.set('role', role);
+    call('/tenants/' + t.id + '/users?' + p.toString())
+      .then((r) => setRows(r.data || []))
+      .catch((e) => toast.error(e.message));
+  }, [t.id, q, role]);
+  useEffect(() => {
+    const x = setTimeout(load, 250);
+    return () => clearTimeout(x);
+  }, [load]);
+
+  const act = async (u: CentreUser, fn: () => Promise<any>, done: string) => {
+    setBusy(u.id);
+    try {
+      await fn();
+      toast.success(done);
+      load();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(0);
+    }
+  };
+
+  return (
+    <Modal title={'İstifadəçilər — ' + t.name} onClose={onClose} wide>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <div className="relative flex-1 min-w-[200px]">
+          <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-[#94A3B8]" />
+          <input className={input + ' pl-9'} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ad və ya e-poçt…" />
+        </div>
+        <select className={input + ' w-auto'} value={role} onChange={(e) => setRole(e.target.value)}>
+          <option value="">Bütün rollar</option>
+          {['admin', 'teacher', 'student', 'guardian'].map((r) => <option key={r} value={r}>{ROLE_AZ[r]}</option>)}
+        </select>
+      </div>
+      {!rows ? (
+        <Loader2 className="w-6 h-6 animate-spin text-[#4F46E5]" />
+      ) : rows.length === 0 ? (
+        <p className="text-sm text-[#64748B] py-6 text-center">Tapılmadı</p>
+      ) : (
+        <div className="overflow-x-auto border border-[#E2E8F0] rounded-xl">
+          <table className="w-full text-sm">
+            <thead className="bg-[#F8FAFC] text-left text-xs text-[#64748B]">
+              <tr>
+                <th className="px-3 py-2">Ad</th>
+                <th className="px-3 py-2">E-poçt</th>
+                <th className="px-3 py-2">Rol</th>
+                <th className="px-3 py-2">Son giriş</th>
+                <th className="px-3 py-2">Vəziyyət</th>
+                <th className="px-3 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((u) => (
+                <tr key={u.id} className="border-t border-[#F1F5F9]">
+                  <td className="px-3 py-2 font-medium text-[#0F172A]">{u.name}</td>
+                  <td className="px-3 py-2 text-[#475569]">{u.email}</td>
+                  <td className="px-3 py-2">{ROLE_AZ[u.role] ?? u.role}</td>
+                  <td className="px-3 py-2 text-xs text-[#64748B] whitespace-nowrap">{u.last_login || '—'}</td>
+                  <td className="px-3 py-2">
+                    <span
+                      className={
+                        'text-[11px] font-semibold px-2 py-0.5 rounded-full ' +
+                        (!u.is_active ? 'bg-[#F1F5F9] text-[#64748B]' : u.status === 'pending' ? 'bg-[#FEF3C7] text-[#92400E]' : 'bg-[#DCFCE7] text-[#166534]')
+                      }
+                    >
+                      {!u.is_active ? 'Deaktiv' : u.status === 'pending' ? 'Gözləyir' : 'Aktiv'}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    <div className="flex justify-end gap-1.5">
+                      {u.is_active && (
+                        <button
+                          disabled={busy === u.id}
+                          className={ghost}
+                          onClick={() => act(u, () => call('/tenants/' + t.id + '/users/' + u.id + '/reset-link', 'POST'), 'Bərpa linki göndərildi: ' + u.email)}
+                          title="Parolu bərpa etmək üçün e-poçta link (24 saat)"
+                        >
+                          <Send className="w-3.5 h-3.5" /> Bərpa linki
+                        </button>
+                      )}
+                      <button
+                        disabled={busy === u.id}
+                        className={ghost}
+                        onClick={() =>
+                          act(u, () => call('/tenants/' + t.id + '/users/' + u.id, 'PUT', { is_active: !u.is_active }), u.is_active ? 'Deaktiv edildi' : 'Aktiv edildi')
+                        }
+                      >
+                        {u.is_active ? 'Deaktiv et' : 'Aktiv et'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="text-xs text-[#94A3B8] mt-3">Deaktiv edilən hesabın bütün sessiyaları dərhal bağlanır. Ən çox 300 nəticə göstərilir — axtarışdan istifadə edin.</p>
+    </Modal>
+  );
+}
+
+// ============================================================
+// Mərkəzin jurnalı: məktublar və audit
+// ============================================================
+const MAIL_STATUS: Record<string, { label: string; cls: string }> = {
+  sent: { label: 'Göndərildi', cls: 'bg-[#DCFCE7] text-[#166534]' },
+  failed: { label: 'Alınmadı', cls: 'bg-[#FEE2E2] text-[#991B1B]' },
+  skipped: { label: 'Göndərilmədi', cls: 'bg-[#FEF3C7] text-[#92400E]' },
+};
+
+const AUDIT_AZ: Record<string, string> = {
+  login: 'Giriş', login_failed: 'Uğursuz giriş', registered: 'Qeydiyyat', password_reset_requested: 'Parol bərpası istəndi',
+  password_reset: 'Parol bərpa edildi', password_changed: 'Parol dəyişdirildi', password_set: 'Parol təyin edildi',
+  password_set_by_admin: 'Admin parol verdi', password_reset_sent: 'Bərpa linki göndərildi', logout_all: 'Bütün cihazlardan çıxış',
+  user_created: 'Hesab yaradıldı', user_updated: 'Hesab dəyişdirildi', user_deleted: 'Hesab silindi',
+  create: 'Yaradıldı', update: 'Dəyişdirildi', delete: 'Silindi', archive: 'Arxivə', restore: 'Arxivdən qaytarıldı',
+};
+
+function CentreLog({ t, onClose }: { t: Tenant; onClose: () => void }) {
+  const [tab, setTab] = useState<'mail' | 'audit'>('mail');
+  const [mails, setMails] = useState<any[] | null>(null);
+  const [audit, setAudit] = useState<any[] | null>(null);
+
+  useEffect(() => {
+    call('/tenants/' + t.id + '/email-log').then((r) => setMails(r.data || [])).catch((e) => toast.error(e.message));
+    call('/tenants/' + t.id + '/audit').then((r) => setAudit(r.data || [])).catch((e) => toast.error(e.message));
+  }, [t.id]);
+
+  const when = (s: string) => new Date(s).toLocaleString('az-AZ');
+  return (
+    <Modal title={'Jurnal — ' + t.name} onClose={onClose} wide>
+      <div className="flex gap-1 mb-4">
+        {(
+          [
+            ['mail', 'Məktublar'],
+            ['audit', 'Audit'],
+          ] as const
+        ).map(([k, l]) => (
+          <button
+            key={k}
+            onClick={() => setTab(k)}
+            className={'px-3 py-1.5 rounded-lg text-sm ' + (tab === k ? 'bg-[#EEF2FF] text-[#4F46E5] font-semibold' : 'text-[#475569]')}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+      {tab === 'mail' &&
+        (!mails ? (
+          <Loader2 className="w-6 h-6 animate-spin text-[#4F46E5]" />
+        ) : mails.length === 0 ? (
+          <p className="text-sm text-[#64748B] py-6 text-center">Hələ məktub yoxdur</p>
+        ) : (
+          <div className="overflow-x-auto border border-[#E2E8F0] rounded-xl">
+            <table className="w-full text-sm">
+              <thead className="bg-[#F8FAFC] text-left text-xs text-[#64748B]">
+                <tr>
+                  <th className="px-3 py-2">Vaxt</th>
+                  <th className="px-3 py-2">Kimə</th>
+                  <th className="px-3 py-2">Mövzu</th>
+                  <th className="px-3 py-2">Vəziyyət</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mails.map((m) => (
+                  <tr key={m.id} className="border-t border-[#F1F5F9]">
+                    <td className="px-3 py-2 text-xs text-[#64748B] whitespace-nowrap">{when(m.created_at)}</td>
+                    <td className="px-3 py-2">{m.to}</td>
+                    <td className="px-3 py-2 max-w-[280px] truncate" title={m.subject}>{m.subject}</td>
+                    <td className="px-3 py-2">
+                      <span className={'text-[11px] font-semibold px-2 py-0.5 rounded-full ' + (MAIL_STATUS[m.status]?.cls || '')} title={m.error || ''}>
+                        {MAIL_STATUS[m.status]?.label || m.status}
+                      </span>
+                      {m.error && <span className="block text-[11px] text-[#94A3B8] max-w-[220px] truncate" title={m.error}>{m.error}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+      {tab === 'audit' &&
+        (!audit ? (
+          <Loader2 className="w-6 h-6 animate-spin text-[#4F46E5]" />
+        ) : audit.length === 0 ? (
+          <p className="text-sm text-[#64748B] py-6 text-center">Hələ qeyd yoxdur</p>
+        ) : (
+          <div className="overflow-x-auto border border-[#E2E8F0] rounded-xl">
+            <table className="w-full text-sm">
+              <thead className="bg-[#F8FAFC] text-left text-xs text-[#64748B]">
+                <tr>
+                  <th className="px-3 py-2">Vaxt</th>
+                  <th className="px-3 py-2">Kim</th>
+                  <th className="px-3 py-2">Hadisə</th>
+                  <th className="px-3 py-2">Bölmə</th>
+                  <th className="px-3 py-2">Qeyd</th>
+                  <th className="px-3 py-2">IP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {audit.map((a) => (
+                  <tr key={a.id} className="border-t border-[#F1F5F9]">
+                    <td className="px-3 py-2 text-xs text-[#64748B] whitespace-nowrap">{when(a.created_at)}</td>
+                    <td className="px-3 py-2">{a.user_email || '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{AUDIT_AZ[a.action] || a.action}</td>
+                    <td className="px-3 py-2 text-[#64748B]">{a.resource}{a.ref_id ? ' #' + a.ref_id : ''}</td>
+                    <td className="px-3 py-2 max-w-[220px] truncate" title={a.detail}>{a.detail}</td>
+                    <td className="px-3 py-2 text-xs text-[#94A3B8]">{a.ip}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ))}
+    </Modal>
+  );
+}
+
+// ============================================================
+// Super adminlər
+// ============================================================
+function SuperAdmins({ me }: { me: { id: number; email: string } | null }) {
+  const [rows, setRows] = useState<any[] | null>(null);
+  const [f, setF] = useState({ name: '', email: '', password: '' });
+  const [busy, setBusy] = useState(false);
+  const [del, setDel] = useState<any>(null);
+
+  const load = useCallback(() => {
+    call('/admins').then((r) => setRows(r.data || [])).catch((e) => toast.error(e.message));
+  }, []);
+  useEffect(load, [load]);
+
+  const add = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await call('/admins', 'POST', f);
+      toast.success('Super admin əlavə edildi');
+      setF({ name: '', email: '', password: '' });
+      load();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!del) return;
+    setBusy(true);
+    try {
+      await call('/admins/' + del.id, 'DELETE');
+      toast.success('Silindi');
+      setDel(null);
+      load();
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8 grid gap-6 md:grid-cols-[1fr_320px]">
+      <div>
+        <h1 className="text-2xl font-extrabold text-[#0F172A]">Super adminlər</h1>
+        <p className="text-sm text-[#64748B] mb-4">Bütün mərkəzləri idarə edən hesablar. Bir e-poçta 5 səhv girişdən sonra 15 dəqiqəlik blok düşür.</p>
+        {!rows ? (
+          <Loader2 className="w-6 h-6 animate-spin text-[#4F46E5]" />
+        ) : (
+          <div className="bg-white rounded-2xl border border-[#E2E8F0] divide-y divide-[#F1F5F9]">
+            {rows.map((a) => (
+              <div key={a.id} className="flex items-center gap-3 px-4 py-3">
+                <ShieldCheck className="w-4 h-4 text-[#4F46E5]" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-[#0F172A]">{a.name} {me && me.id === a.id && <span className="text-xs font-normal text-[#64748B]">(siz)</span>}</p>
+                  <p className="text-xs text-[#64748B]">{a.email} · {new Date(a.created_at).toLocaleDateString('az-AZ')}</p>
+                </div>
+                {me && me.id !== a.id && (
+                  <button className={ghost} onClick={() => setDel(a)}>
+                    <Trash2 className="w-3.5 h-3.5" /> Sil
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <form onSubmit={add} className="bg-white rounded-2xl border border-[#E2E8F0] p-5 space-y-3 self-start">
+        <p className="font-semibold text-[#0F172A] flex items-center gap-2"><UserPlus className="w-4 h-4" /> Yeni super admin</p>
+        <Field label="Ad">
+          <input className={input} required value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+        </Field>
+        <Field label="E-poçt">
+          <input className={input} type="email" required value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
+        </Field>
+        <Field label="Parol (ən azı 8 simvol)">
+          <input className={input} type="password" minLength={8} required value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} autoComplete="new-password" />
+        </Field>
+        <button disabled={busy} className={primary + ' w-full'}>
+          {busy && <Loader2 className="w-4 h-4 animate-spin" />} Əlavə et
+        </button>
+      </form>
+      {del && (
+        <Modal title="Super admin silinsin?" onClose={() => setDel(null)}>
+          <p className="text-sm text-[#475569] mb-4">{del.name} ({del.email}) panelə daha daxil ola bilməyəcək.</p>
+          <div className="flex justify-end gap-2">
+            <button className={ghost} onClick={() => setDel(null)}>Ləğv et</button>
+            <button disabled={busy} onClick={remove} className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#DC2626] text-white text-xs font-semibold">
+              <Trash2 className="w-3.5 h-3.5" /> Sil
+            </button>
+          </div>
+        </Modal>
+      )}
+    </main>
   );
 }

@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { AlertCircle, CheckCircle2, KeyRound, Loader2 } from 'lucide-react';
 import { auth } from '@/edu/utils/api';
+import { PasswordFields, passwordIssue } from '@/edu/components/PasswordFields';
 
 // The link an admin hands a new user: the user chooses the password here.
 function SetupPassword() {
@@ -36,8 +37,9 @@ function SetupPassword() {
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pw !== pw2) {
-      setError('Parollar eyni deyil');
+    const issue = passwordIssue(pw, pw2);
+    if (issue) {
+      setError(issue);
       return;
     }
     setBusy(true);
@@ -52,9 +54,6 @@ function SetupPassword() {
       setBusy(false);
     }
   };
-
-  const input =
-    'w-full px-3 py-2.5 rounded-xl border border-[#E2E8F0] text-sm focus:outline-none focus:ring-2 focus:ring-[#4F46E5]/30 focus:border-[#4F46E5]';
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC] px-6 py-12">
@@ -84,8 +83,7 @@ function SetupPassword() {
           )}
           {state === 'ready' && (
             <form onSubmit={submit} className="space-y-4">
-              <input className={input} type="password" minLength={6} required placeholder="Yeni parol (min. 6 simvol)" value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="new-password" />
-              <input className={input} type="password" minLength={6} required placeholder="Parolu təkrarlayın" value={pw2} onChange={(e) => setPw2(e.target.value)} autoComplete="new-password" />
+              <PasswordFields pw={pw} pw2={pw2} setPw={setPw} setPw2={setPw2} />
               {error && <p className="text-sm text-[#B91C1C]">{error}</p>}
               <button disabled={busy} className="w-full py-2.5 rounded-xl bg-[#4F46E5] text-white text-sm font-semibold hover:bg-[#4338CA] disabled:opacity-60 flex items-center justify-center gap-2">
                 {busy && <Loader2 className="w-4 h-4 animate-spin" />} Saxla

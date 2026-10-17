@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Search, Pencil, Trash2, Archive, ArchiveRestore, ChevronLeft, ChevronRight,
-  Link2, Heart, Users, BookOpen, CheckCircle2, Wand2,
+  Link2, Heart, Users, BookOpen, CheckCircle2, Wand2, Download,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, can, getUser, ListParams } from '../utils/api';
@@ -519,6 +519,63 @@ function GenericCrudPage({ def, meta, color = '#2F5BEA', fixedFilters }: Props) 
     }
   };
 
+  // --- CSV ixracı: cari axtarış və filtrlərlə bütün sətirlər (Excel-də açılır) ---
+  const [exporting, setExporting] = useState(false);
+  const cellText = (row: Row, col: ColumnDef): string => {
+    const v = row[col.key];
+    if (v === null || v === undefined || v === '') return '';
+    switch (col.type) {
+      case 'bool':
+        return v ? 'Bəli' : 'Xeyr';
+      case 'badge':
+        return (col.map && col.map[v]) || String(v);
+      case 'date':
+        return new Date(v).toLocaleDateString('az-AZ');
+      case 'money':
+      case 'number':
+        return String(v).replace('.', ',');
+      case 'relation': {
+        const l = relLabel(col.resource, v);
+        return typeof l === 'string' ? l : String(v);
+      }
+      default:
+        return (col.map && col.map[v]) || (typeof v === 'object' ? JSON.stringify(v) : String(v));
+    }
+  };
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const params: ListParams = { per_page: 500 };
+      if (q) params.q = q;
+      if (showArchived) params.archived = '1';
+      Object.keys(filters).forEach((k) => { if (filters[k]) params[k] = filters[k]; });
+      const fixed = JSON.parse(fixedKey) as Record<string, string | number>;
+      Object.keys(fixed).forEach((k) => { params[k] = fixed[k]; });
+      let all: Row[] = [];
+      for (let p = 1; p <= 40; p++) {
+        const res = await api.list(def.key, { ...params, page: p });
+        all = all.concat(res.data || []);
+        if (all.length >= (res.total || 0) || !(res.data || []).length) break;
+      }
+      const quote = (x: string) => (/[";\n\r]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x);
+      const lines = [def.columns.map((c) => quote(c.label)).join(';')];
+      all.forEach((r) => lines.push(def.columns.map((c) => quote(cellText(r, c))).join(';')));
+      const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = def.key + '-' + new Date().toISOString().slice(0, 10) + '.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+      toast.success(all.length + ' sətir ixrac edildi');
+    } catch (e: any) {
+      if (e?.status !== 403) toast.error(e?.message || 'İxrac alınmadı');
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const canCreate = can(def.key, 'create') && !def.readOnly;
   const canUpdate = can(def.key, 'update') && !def.readOnly;
   const canDelete = can(def.key, 'delete') && !def.readOnly;
@@ -527,6 +584,7 @@ function GenericCrudPage({ def, meta, color = '#2F5BEA', fixedFilters }: Props) 
   const pages = Math.max(1, Math.ceil(total / perPage));
 
   const hasToolbar =
+    total > 0 ||
     def.searchable ||
     (def.filters && def.filters.length > 0) ||
     def.archivable ||
@@ -585,6 +643,12 @@ function GenericCrudPage({ def, meta, color = '#2F5BEA', fixedFilters }: Props) 
           )}
 
           <div className="ml-auto flex flex-wrap gap-2 items-center">
+            {total > 0 && (
+              <Button variant="ghost" onClick={exportCsv} disabled={exporting}>
+                <Download className="w-4 h-4" />
+                {exporting ? 'Hazırlanır…' : 'Excel (CSV)'}
+              </Button>
+            )}
             {visibleToolbarActions.map((a) => (
               <Button key={a.key} variant="ghost" onClick={() => openToolbarAction(a)}>
                 <Wand2 className="w-4 h-4" />

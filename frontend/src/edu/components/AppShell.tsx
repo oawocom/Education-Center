@@ -7,6 +7,7 @@ import {
   FlaskConical, FileText, Target, Library, FolderOpen, ListChecks, Wallet, Receipt, CreditCard, Building2,
   DoorOpen, BookMarked, BarChart3, Megaphone, MessageSquare, KeyRound, Shield, Settings, Award, Menu, X, LogOut,
   Circle, HelpCircle, Inbox, Clock, Send, TrendingUp, Search, Home, Wrench, Banknote, ChevronDown, Copy, Wallet as WalletIcon,
+  UserCog, MailOpen, ScrollText,
 } from 'lucide-react';
 import { auth, getUser, getToken, clearSession, EduUser, saveSession } from '../utils/api';
 import { visibleNav, ROLE_THEME, NavItem, Role } from '../nav';
@@ -14,6 +15,8 @@ import { buildHubs } from '../hubs';
 import { ROLE_LABEL } from '../screens';
 import { T } from '../theme';
 import Onboarding from './Onboarding';
+import NotificationBell from './NotificationBell';
+import ProfileModal from './ProfileModal';
 
 // ============================================================
 // AppShell — HUB əsaslı naviqasiya (yuxarı hub-lar + alt-tablar + Ctrl+K axtarış)
@@ -30,11 +33,13 @@ const ICONS: Record<string, any> = {
   subjects: BookMarked, levels: TrendingUp, reports: BarChart3, announcements: Megaphone, messages: MessageSquare,
   users: KeyRound, 'sub-roles': Shield, settings: Settings, achievements: Award, results: TrendingUp,
   questions: HelpCircle, availability: Clock, 'teacher-availability': Clock,
+  email: MailOpen, audit: ScrollText,
 };
 
 const HUB_ICONS: Record<string, any> = {
   home: Home, people: Users, teaching: CalendarDays, schedule: CalendarDays, groups: Users, subjects: BookMarked, assess: FlaskConical, content: Library, finance: Banknote,
   center: Building2, comm: Megaphone, tasks: ListChecks, child: Heart, results: TrendingUp, more: FolderOpen, other: Circle,
+  system: Settings,
 };
 
 interface Props {
@@ -54,6 +59,16 @@ export default function AppShell({ activeKey, activeLabel, onNavigate, children 
   const navRef = useRef<NavItem[]>([]);
   const goRef = useRef<(i: NavItem) => void>(() => {});
   const [lastIn, setLastIn] = useState<Record<string, string>>({});
+  const [centre, setCentre] = useState('');
+  const [profile, setProfile] = useState(false);
+
+  useEffect(() => {
+    auth.tenant().then((t) => setCentre(t.name || '')).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (centre) document.title = centre;
+  }, [centre]);
 
   useEffect(() => {
     if (!getToken()) {
@@ -157,7 +172,7 @@ export default function AppShell({ activeKey, activeLabel, onNavigate, children 
             <div className="w-8 h-8 rounded-lg flex items-center justify-center text-white" style={{ background: theme.color }}>
               <GraduationCap className="w-[18px] h-[18px]" />
             </div>
-            <span className="hidden sm:block text-sm font-semibold">Təlim mərkəzi</span>
+            <span className="hidden sm:block text-sm font-semibold max-w-[180px] truncate" title={centre}>{centre || 'Təlim mərkəzi'}</span>
           </div>
 
           <nav className="flex-1 flex items-center gap-1 overflow-x-auto no-scrollbar">
@@ -188,6 +203,8 @@ export default function AppShell({ activeKey, activeLabel, onNavigate, children 
             <kbd className="hidden md:inline text-[10px] px-1.5 py-0.5 rounded" style={{ background: T.lineSoft }}>Ctrl K</kbd>
           </button>
 
+          <NotificationBell color={theme.color} />
+
           <div className="relative shrink-0">
             <button onClick={() => setMenu((m) => !m)} className="flex items-center gap-1.5">
               <span className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold" style={{ background: theme.soft, color: theme.color }}>
@@ -215,6 +232,13 @@ export default function AppShell({ activeKey, activeLabel, onNavigate, children 
                       <span className="flex items-center gap-1.5 tabular-nums font-medium">{user.code} <Copy className="w-3.5 h-3.5" style={{ color: T.inkFaint }} /></span>
                     </button>
                   )}
+                  <button
+                    onClick={() => { setMenu(false); setProfile(true); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-black/5"
+                    style={{ color: T.ink }}
+                  >
+                    <UserCog className="w-4 h-4" style={{ color: T.inkSoft }} /> Profil və parol
+                  </button>
                   <button onClick={handleLogout} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-black/5" style={{ color: T.bad }}>
                     <LogOut className="w-4 h-4" /> Çıxış
                   </button>
@@ -284,6 +308,14 @@ export default function AppShell({ activeKey, activeLabel, onNavigate, children 
             </div>
           </div>
         </div>
+      )}
+      {profile && (
+        <ProfileModal
+          user={user}
+          color={theme.color}
+          onClose={() => setProfile(false)}
+          onUser={(u) => setUser(u)}
+        />
       )}
       <style>{`.no-scrollbar::-webkit-scrollbar{display:none}.no-scrollbar{scrollbar-width:none}`}</style>
     </div>

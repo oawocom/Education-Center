@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import AppShell from '@/edu/components/AppShell';
 import CrudPage from '@/edu/components/CrudPage';
 import Dashboard from '@/edu/components/Dashboard';
@@ -11,6 +11,8 @@ import AchievementsScreen from '@/edu/components/AchievementsScreen';
 import AvailabilityGrid from '@/edu/components/AvailabilityGrid';
 import AttendanceBoard from '@/edu/components/AttendanceBoard';
 import UsersScreen from '@/edu/components/UsersScreen';
+import EmailScreen from '@/edu/components/EmailScreen';
+import AuditScreen from '@/edu/components/AuditScreen';
 import { ReportsScreen, BranchStatsScreen } from '@/edu/components/ReportsScreen';
 import { PrincipleNote, ScreenHeader } from '@/edu/components/screen';
 import { getResource } from '@/edu/resources';
@@ -24,6 +26,17 @@ export default function EducationCenterDashboard() {
   const user = getUser();
   const role = (user?.role || 'admin') as Role;
   const color = (ROLE_THEME[role] || ROLE_THEME.admin).color;
+
+  // E-poçtdakı linklər /dashboard?view=<bölmə> ilə gəlir
+  useEffect(() => {
+    try {
+      const v = new URLSearchParams(window.location.search).get('view');
+      if (!v) return;
+      const it = (NAV[role] || []).find((i) => i.key === v);
+      if (it) setActive(it);
+      window.history.replaceState(null, '', '/dashboard');
+    } catch (e) {}
+  }, [role]);
 
   const item = active || (NAV[role] || NAV.admin)[0];
   const meta = getScreen(role, item.key) || { h1: item.label, sub: '' };
@@ -54,6 +67,16 @@ export default function EducationCenterDashboard() {
     // --- İstifadəçilər ---
     if (item.view === 'users') {
       return <UsersScreen meta={meta} color={color} />;
+    }
+
+    // --- E-poçt şablonları və jurnal ---
+    if (item.view === 'email') {
+      return <EmailScreen meta={meta} color={color} />;
+    }
+
+    // --- Audit jurnalı ---
+    if (item.view === 'audit') {
+      return <AuditScreen meta={meta} color={color} />;
     }
 
     // --- Müəllimin boş saatları: klik edilə bilən grid ---

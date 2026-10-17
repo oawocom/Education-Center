@@ -217,7 +217,7 @@ func (h *Handler) Login(c *gin.Context) {
 		if found {
 			uid = &user.ID
 		}
-		auditAs(c, db, uid, email, "login_failed", "auth", uid, "")
+		auditAs(c, db, uid, email, "login_failed", "auth", nil, "")
 		c.JSON(401, gin.H{"error": "E-poçt və ya parol yanlışdır"})
 		return
 	}
@@ -229,7 +229,7 @@ func (h *Handler) Login(c *gin.Context) {
 
 	db.Model(&user).Update("last_login", time.Now())
 	ensureUserCode(db, &user)
-	auditAs(c, db, &user.ID, user.Email, "login", "auth", &user.ID, "")
+	auditAs(c, db, &user.ID, user.Email, "login", "auth", nil, "")
 
 	signed, err := issueToken(&user)
 	if err != nil {

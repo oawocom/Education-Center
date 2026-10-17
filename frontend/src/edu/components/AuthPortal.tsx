@@ -99,7 +99,7 @@ export default function AuthPortal() {
           {err && <p className="text-sm px-3 py-2 rounded-lg" style={{ background: T.badSoft, color: T.bad }}>{err}</p>}
           <input className={inp} style={{ borderColor: T.line }} placeholder="Ad və soyad" required value={name} onChange={(e) => setName(e.target.value)} />
           <input className={inp} style={{ borderColor: T.line }} type="email" placeholder="E-poçt" required value={email} onChange={(e) => setEmail(e.target.value)} />
-          <input className={inp} style={{ borderColor: T.line }} type="password" minLength={6} placeholder="Parol (min. 6 simvol)" required value={pw} onChange={(e) => setPw(e.target.value)} />
+          <input className={inp} style={{ borderColor: T.line }} type="password" minLength={8} autoComplete="new-password" placeholder="Parol (ən azı 8 simvol)" required value={pw} onChange={(e) => setPw(e.target.value)} />
           <button disabled={busy} className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-white font-semibold disabled:opacity-60" style={{ background: T.accent }}>
             {busy && <Loader2 className="w-4 h-4 animate-spin" />} Qeydiyyatdan keç
           </button>

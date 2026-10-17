@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { GraduationCap, Mail, Lock, Eye, EyeOff, AlertCircle, Loader2 } from 'lucide-react';
 import { auth, saveSession, getToken } from '@/edu/utils/api';
 import AuthPortal from '@/edu/components/AuthPortal';
@@ -96,7 +97,10 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-sm font-semibold text-[#0F172A] mb-1.5">Şifrə</label>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-semibold text-[#0F172A]">Parol</label>
+                <Link href="/forgot-password" className="text-xs font-medium text-[#4F46E5] hover:underline">Parolu unutmusunuz?</Link>
+              </div>
               <div className="relative">
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94A3B8]" />
                 <input
@@ -140,7 +144,7 @@ export default function LoginPage() {
         <AuthPortal />
 
         <p className="text-center text-xs text-[#94A3B8] mt-6">
-          Giriş məlumatlarınızı mərkəzin administrasiyası verir.
+          Hesabınızı mərkəzin administrasiyası da aça bilər — dəvət linki e-poçtunuza gəlir.
         </p>
       </div>
     </div>

@@ -192,7 +192,11 @@ func (h *Handler) Register(c *gin.Context) {
 // welcome - yeni qeydiyyat: xoş gəldin məktubu + audit.
 func (h *Handler) welcome(c *gin.Context, db *gorm.DB, u *EduUser) {
 	sendTemplate(db, "welcome", u.Email, &u.ID, map[string]string{"name": firstNonEmpty(u.DisplayName, u.Name), "email": u.Email, "link": siteURL(c) + "/login"})
-	auditAs(c, db, &u.ID, u.Email, "registered", "auth", &u.ID, u.Provider)
+	how := "e-poçt və parol ilə"
+	if u.Provider == "google" {
+		how = "Google ilə"
+	}
+	auditAs(c, db, &u.ID, u.Email, "registered", "auth", nil, how)
 }
 
 // POST /auth/google {credential} — Google ID token

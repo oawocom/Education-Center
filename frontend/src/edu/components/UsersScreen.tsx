@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Key, Trash2, UserPlus, Copy, Pencil, Wand2, AlertTriangle, Link2, CheckCircle2, Hash, Clock } from 'lucide-react';
+import { Key, Trash2, UserPlus, Copy, Pencil, Wand2, AlertTriangle, Link2, CheckCircle2, Hash, Clock, MailCheck, Send } from 'lucide-react';
 import { toast } from 'sonner';
 import { api, can, auth, EduUser } from '../utils/api';
 import { T, ROLE_COLOR } from '../theme';
@@ -64,7 +64,7 @@ const FIELDS: FieldDef[] = [
   { key: 'name', label: 'Ad Soyad', type: 'text', required: true, width: 'half' },
   { key: 'email', label: 'E-poçt', type: 'email', required: true, width: 'half' },
   { key: 'role', label: 'Rol', type: 'select', required: true, width: 'half', options: ROLE_OPTIONS },
-  { key: 'password', label: 'Şifrə', type: 'text', width: 'half', help: 'Boş buraxılsa dəvət linki yaradılır' },
+  { key: 'password', label: 'Parol', type: 'text', width: 'half', help: 'Boş buraxın: dəvət linki e-poçtla gedəcək və istifadəçi parolu özü təyin edəcək' },
   { key: 'teacher_id', label: 'Müəllim profili', type: 'relation', resource: 'teachers', width: 'half' },
   { key: 'student_id', label: 'Şagird profili', type: 'relation', resource: 'students', width: 'half' },
   { key: 'guardian_id', label: 'Valideyn profili', type: 'relation', resource: 'guardians', width: 'half' },
@@ -257,6 +257,7 @@ export default function UsersScreen({ meta, color }: Props) {
   const [form, setForm] = useState<Record<string, any>>({ role: 'teacher' });
   const [saving, setSaving] = useState(false);
   const [inviteUrl, setInviteUrl] = useState('');
+  const [inviteMail, setInviteMail] = useState('');
 
   const [resetting, setResetting] = useState<UserRow | null>(null);
   const [newPassword, setNewPassword] = useState('');
@@ -306,8 +307,10 @@ export default function UsersScreen({ meta, color }: Props) {
     api
       .raw('/users', { method: 'POST', body: JSON.stringify(form) })
       .then((res) => {
-        toast.success(form.password ? 'İstifadəçi yaradıldı' : 'Dəvət linki hazırdır');
+        const mailed = res && res.email_status === 'queued';
+        toast.success(form.password ? 'İstifadəçi yaradıldı' : mailed ? 'Dəvət e-poçtla göndərildi' : 'Dəvət linki hazırdır');
         if (res && res.setup_url) setInviteUrl(res.setup_url);
+        setInviteMail(res && res.setup_url ? (mailed ? 'sent:' + form.email : res.email_status || '') : '');
         setForm({ role: 'teacher' });
         setCreating(false);
         load();
@@ -342,9 +345,17 @@ export default function UsersScreen({ meta, color }: Props) {
       .finally(() => setSaving(false));
   };
 
+  const sendReset = () => {
+    if (!resetting) return;
+    api
+      .raw(`/users/${resetting.id}/send-reset`, { method: 'POST' })
+      .then(() => { toast.success('Bərpa linki göndərildi', { description: resetting.email + ' · 24 saat etibarlı' }); setResetting(null); })
+      .catch((e) => { if (e?.status !== 403) toast.error(e?.message || 'Göndərilmədi'); });
+  };
+
   const resetPassword = () => {
-    if (!resetting || newPassword.length < 6) {
-      toast.error('Şifrə ən az 6 simvol olmalıdır');
+    if (!resetting || newPassword.length < 8) {
+      toast.error('Parol ən azı 8 simvol olmalıdır');
       return;
     }
     api
@@ -445,7 +456,15 @@ export default function UsersScreen({ meta, color }: Props) {
 
       {inviteUrl && (
         <div className="rounded-xl p-3" style={{ background: T.accentSoft, border: `1px solid ${T.line}` }}>
-          <p className="text-xs font-semibold mb-1.5" style={{ color: T.accent }}>Dəvət linki (7 gün etibarlı)</p>
+          {inviteMail.indexOf('sent:') === 0 ? (
+            <p className="text-xs font-semibold mb-1.5 flex items-center gap-1.5" style={{ color: T.ok }}>
+              <MailCheck className="w-4 h-4" /> Dəvət {inviteMail.slice(5)} ünvanına göndərildi. Lazım olsa, linki özünüz də ötürə bilərsiniz (7 gün etibarlı):
+            </p>
+          ) : (
+            <p className="text-xs font-semibold mb-1.5" style={{ color: T.accent }}>
+              Dəvət linki (7 gün etibarlı){inviteMail === 'not_configured' ? ' — e-poçt qurulmayıb, linki istifadəçiyə özünüz ötürün' : ''}
+            </p>
+          )}
           <div className="flex items-center gap-2">
             <code className="flex-1 text-xs break-all" style={{ color: T.accent }}>{inviteUrl}</code>
             <button
@@ -491,7 +510,7 @@ export default function UsersScreen({ meta, color }: Props) {
                         <button onClick={() => openEdit(u)} className="p-1.5 rounded-lg hover:bg-[#F0EEE8]" style={{ color: T.inkSoft }} title="Redaktə">
                           <Pencil className="w-4 h-4" />
                         </button>
-                        <button onClick={() => { setResetting(u); setNewPassword(''); }} className="p-1.5 rounded-lg hover:bg-[#F0EEE8]" style={{ color: T.inkSoft }} title="Şifrəni sıfırla">
+                        <button onClick={() => { setResetting(u); setNewPassword(''); }} className="p-1.5 rounded-lg hover:bg-[#F0EEE8]" style={{ color: T.inkSoft }} title="Parol: bərpa linki və ya yeni parol">
                           <Key className="w-4 h-4" />
                         </button>
                         <button onClick={() => setDeleting(u)} className="p-1.5 rounded-lg hover:bg-[#FDEBEF]" style={{ color: T.bad }} title="Sil">
@@ -572,21 +591,30 @@ export default function UsersScreen({ meta, color }: Props) {
 
       <Modal
         open={!!resetting}
-        title={resetting ? `${resetting.name} — yeni şifrə` : ''}
+        title={resetting ? `${resetting.name} — parol` : ''}
         onClose={() => setResetting(null)}
         footer={
           <>
             <Button variant="ghost" onClick={() => setResetting(null)}>Ləğv et</Button>
-            <Button onClick={resetPassword} color={color}>Təsdiqlə</Button>
+            <Button onClick={resetPassword} color={color}>Parolu təyin et</Button>
           </>
         }
       >
+        <div className="rounded-xl border p-3 mb-4" style={{ borderColor: T.line }}>
+          <p className="text-sm font-semibold">Ən yaxşısı: bərpa linki göndərin</p>
+          <p className="text-xs mt-1 mb-3" style={{ color: T.inkSoft }}>
+            İstifadəçi {resetting?.email} ünvanına gələn linklə parolunu özü təyin edir — parol heç kimə görünmür.
+          </p>
+          <Button variant="ghost" onClick={sendReset}><Send className="w-3.5 h-3.5" /> Bərpa linkini göndər</Button>
+        </div>
+        <p className="text-sm font-semibold mb-1.5">Və ya parolu özünüz verin</p>
         <input
           value={newPassword}
           onChange={(e) => setNewPassword(e.target.value)}
-          placeholder="Ən az 6 simvol"
+          placeholder="Ən azı 8 simvol"
           className="w-full px-3 py-2 rounded-xl border border-[#E8E5DE] text-sm"
         />
+        <p className="text-xs mt-2" style={{ color: T.inkFaint }}>İstifadəçinin bütün cihazlardakı sessiyaları bağlanacaq və ona xəbərdarlıq məktubu gedəcək.</p>
       </Modal>
 
       <Modal
