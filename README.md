@@ -58,9 +58,12 @@ location / {
    - ilk adminin adı, e-poçtu və parolu.
 
    Mərkəzin bazası, cədvəlləri və ilkin sorğu kitabçaları avtomatik yaranır.
-3. Domenin DNS-ini serverə yönəldin. Mərkəzin admini `https://<domen>/login` ünvanında daxil olur.
+3. Kartdakı "E-poçt" düyməsi ilə mərkəzin SMTP-sini yazın və sınaq məktubu göndərin. Boş qalsa `.env`-dəki ümumi `SMTP_*` işləyir; o da yoxdursa məktublar getmir (dəvət, parol bərpası, bildirişlər).
+4. Domenin DNS-ini serverə yönəldin. Mərkəzin admini `https://<domen>/login` ünvanında daxil olur.
 
-Super admin paneldən mərkəzi dayandırmaq, domenlərini dəyişmək və istifadəçiyə yeni parol vermək olar.
+Super admin paneldən mərkəzi dayandırmaq, domenlərini dəyişmək, istifadəçiləri axtarıb aktiv/deaktiv etmək, bərpa linki göndərmək, məktub və audit jurnalına baxmaq, başqa super admin əlavə etmək olar.
+
+Mərkəzin admini məktub şablonlarını "Sistem → E-poçt" bölməsində dəyişir, söndürür və test göndərir.
 
 ## Köhnə quraşdırmadan məlumat köçürmək
 
